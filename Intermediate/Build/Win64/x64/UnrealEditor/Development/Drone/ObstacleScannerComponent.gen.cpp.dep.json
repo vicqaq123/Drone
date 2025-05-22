@@ -1,0 +1,17 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\ue5\\drone\\intermediate\\build\\win64\\unrealeditor\\inc\\drone\\uht\\obstaclescannercomponent.gen.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\ue5\\drone\\intermediate\\build\\win64\\x64\\droneeditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.cpp20.inclorderoldest.h.pch",
+        "Includes": [
+            "d:\\ue5\\drone\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\drone\\definitions.drone.h",
+            "d:\\ue5\\drone\\source\\drone\\obstaclescannercomponent.h",
+            "d:\\ue5\\drone\\source\\drone\\gridmapcomponent.h",
+            "d:\\ue5\\drone\\intermediate\\build\\win64\\unrealeditor\\inc\\drone\\uht\\gridmapcomponent.generated.h",
+            "d:\\ue5\\drone\\intermediate\\build\\win64\\unrealeditor\\inc\\drone\\uht\\obstaclescannercomponent.generated.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

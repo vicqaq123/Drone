@@ -1,0 +1,26 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\ue5\\drone\\source\\drone\\obstaclescannercomponent.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\ue5\\drone\\intermediate\\build\\win64\\x64\\droneeditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.cpp20.inclorderoldest.h.pch",
+        "Includes": [
+            "d:\\ue5\\drone\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\drone\\definitions.drone.h",
+            "d:\\ue5\\drone\\source\\drone\\obstaclescannercomponent.h",
+            "d:\\ue5\\drone\\source\\drone\\gridmapcomponent.h",
+            "d:\\ue5\\drone\\intermediate\\build\\win64\\unrealeditor\\inc\\drone\\uht\\gridmapcomponent.generated.h",
+            "d:\\ue5\\drone\\intermediate\\build\\win64\\unrealeditor\\inc\\drone\\uht\\obstaclescannercomponent.generated.h",
+            "d:\\epic\\ue_5.4\\engine\\source\\runtime\\engine\\classes\\kismet\\gameplaystatics.h",
+            "d:\\epic\\ue_5.4\\engine\\source\\runtime\\engine\\classes\\kismet\\kismetsystemlibrary.h",
+            "d:\\epic\\ue_5.4\\engine\\source\\runtime\\coreuobject\\public\\uobject\\propertyaccessutil.h",
+            "d:\\epic\\ue_5.4\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\engine\\uht\\kismetsystemlibrary.generated.h",
+            "d:\\epic\\ue_5.4\\engine\\source\\runtime\\engine\\classes\\sound\\dialoguetypes.h",
+            "d:\\epic\\ue_5.4\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\engine\\uht\\dialoguetypes.generated.h",
+            "d:\\epic\\ue_5.4\\engine\\source\\runtime\\engine\\classes\\kismet\\gameplaystaticstypes.h",
+            "d:\\epic\\ue_5.4\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\engine\\uht\\gameplaystaticstypes.generated.h",
+            "d:\\epic\\ue_5.4\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\engine\\uht\\gameplaystatics.generated.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}
