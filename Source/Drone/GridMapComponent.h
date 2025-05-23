@@ -14,6 +14,9 @@ struct FCylinderObstacle
     float Height;
 };
 
+// 在UCLASS前添加：
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGridMapUpdated, const FVector&, UpdatedLocation);
+
 UCLASS(ClassGroup=(PathPlanning), meta=(BlueprintSpawnableComponent))
 class DRONE_API UGridMapComponent : public UActorComponent
 {
@@ -102,6 +105,14 @@ public:
     
     FORCEINLINE FVector GetMapOrigin() const { return MapOrigin; }
     FORCEINLINE FVector GetMapSize() const { return MapSize; }
+    
+    // 新增：地图更新事件
+    UPROPERTY(BlueprintAssignable, Category="PathPlanning|GridMap")
+    FOnGridMapUpdated OnGridMapUpdated;
+    
+    // 新增：清空所有障碍物并广播地图更新事件
+    UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
+    void ClearObstacles();
     
 private:
     // Grid map data

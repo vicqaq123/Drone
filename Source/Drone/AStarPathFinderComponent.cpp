@@ -1,6 +1,7 @@
 // AStarPathFinderComponent.cpp
 #include "AStarPathFinderComponent.h"
 #include "DrawDebugHelpers.h"
+#include "PathModifierComponent.h"
 
 // Helper struct for A* algorithm
 struct FAStarNode
@@ -44,6 +45,14 @@ UAStarPathFinderComponent::UAStarPathFinderComponent()
 void UAStarPathFinderComponent::SetGridMap(UGridMapComponent* InGridMap)
 {
     GridMap = InGridMap;
+    if (GridMap)
+    {
+        UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: GridMap successfully set"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: GridMap set to null"));
+    }
 }
 
 bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Goal, TArray<FVector>& OutPath)
@@ -53,6 +62,9 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
         UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: GridMap is not set"));
         return false;
     }
+    
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: Starting path finding from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)"),
+        Start.X, Start.Y, Start.Z, Goal.X, Goal.Y, Goal.Z);
     
     // Clear previous path
     StoredPath.Empty();
@@ -162,7 +174,7 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
         
         FAStarNode* Current = OpenSet[BestIndex];
         OpenSet.RemoveAt(BestIndex);
-        if(Steps%1000==0)
+        if(Steps%10000==0)
         {UE_LOG(LogTemp, Log, TEXT("Step %d: Current node at grid (%d, %d, %d), world (%.2f, %.2f, %.2f), FScore=%.2f"), 
             Steps, Current->GridX, Current->GridY, Current->GridZ, 
             Current->Position.X, Current->Position.Y, Current->Position.Z, Current->FScore);}
@@ -200,6 +212,29 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
             StoredPath = OutPath;
             UE_LOG(LogTemp, Log, TEXT("FindPath: Found path with %d points in %d steps, final distance to goal: %.2f"), 
                 OutPath.Num(), Steps, DistanceToGoal);
+            
+            // 在成功找到路径后自动同步到PathModifierComponent
+            if (OutPath.Num() > 0)
+            {
+                AActor* Owner = GetOwner();
+                if (Owner)
+                {
+                    UPathModifierComponent* PathMod = Owner->FindComponentByClass<UPathModifierComponent>();
+                    if (PathMod)
+                    {
+                        PathMod->SetPath(OutPath);
+                        UE_LOG(LogTemp, Warning, TEXT("[AStar] 已自动同步路径到PathModifierComponent，点数: %d"), OutPath.Num());
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("[AStar] 未找到PathModifierComponent组件"));
+                    }
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("[AStar] 未找到有效的Owner Actor"));
+                }
+            }
             return true;
         }
         
@@ -259,7 +294,7 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
                 Neighbor->FScore = TentativeGScore + NeighborHScore;
                 Neighbor->Parent = Current;
                 OpenSet.Add(Neighbor);
-                if(Steps%1000==0)
+                if(Steps%10000==0)
                 {
                 UE_LOG(LogTemp, Log, TEXT("Step %d: Added new node at grid (%d, %d, %d), GScore=%.2f, HScore=%.2f, FScore=%.2f"), 
                     Steps, Neighbor->GridX, Neighbor->GridY, Neighbor->GridZ, 
@@ -274,7 +309,7 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
                 OpenNode->FScore = TentativeGScore + OpenNodeHScore;
                 OpenNode->Parent = Current;
                 delete Neighbor;
-                if(Steps%1000==0)
+                if(Steps%10000==0)
                 {
                 UE_LOG(LogTemp, Log, TEXT("Step %d: Updated existing node at grid (%d, %d, %d), new GScore=%.2f, HScore=%.2f, FScore=%.2f"), 
                     Steps, OpenNode->GridX, OpenNode->GridY, OpenNode->GridZ, 
@@ -307,7 +342,8 @@ void UAStarPathFinderComponent::VisualizePath(float Duration)
         UE_LOG(LogTemp, Error, TEXT("VisualizePath: No valid world found!"));
         return;
     }
-    
+    // FlushPersistentDebugLines(GetWorld());
+
     if (StoredPath.Num() < 2)
     {
         UE_LOG(LogTemp, Warning, TEXT("VisualizePath: Not enough path points! Current points: %d"), StoredPath.Num());
@@ -895,4 +931,29 @@ void UAStarPathFinderComponent::ChaikinSmoothPath(TArray<FVector>& Path, int Ite
         NewPath.Add(Path.Last()); // 保留终点
         Path = NewPath;
     }
+}
+
+void UAStarPathFinderComponent::UpdateStoredPath(const TArray<FVector>& NewPath)
+{
+    // 清空之前的可视化
+    if (PathSpline)
+    {
+        PathSpline->DestroyComponent();
+        PathSpline = nullptr;
+    }
+    StoredPath = NewPath;
+    // 重新可视化路径
+    VisualizePath(5.0f); // 可视化新路径，持续5秒
+}
+
+void UAStarPathFinderComponent::SetPath(const TArray<FVector>& InPath)
+{
+    CurrentPath = InPath;
+    UE_LOG(LogTemp, Warning, TEXT("[PathModifier] SetPath 被调用，路径点数: %d"), CurrentPath.Num());
+    for (int32 i = 0; i < CurrentPath.Num(); ++i)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径点[%d]: %s"), i, *CurrentPath[i].ToString());
+    }
+    // 自动调用UpdateStoredPath以更新存储的路径并重新可视化
+    UpdateStoredPath(CurrentPath);
 }

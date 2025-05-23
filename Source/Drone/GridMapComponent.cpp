@@ -132,6 +132,11 @@ void UGridMapComponent::UpdateObstaclesFromScene(float DetectionRadius)
     
     // Apply inflation to ensure safety margins
     InflateObstacles(InflationRadius);
+    
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(FVector::ZeroVector); // 或合适的位置参数
+    }
 }
 
 void UGridMapComponent::AddObstacles(const TArray<FVector>& ObstaclePositions, float InInflationRadius)
@@ -156,6 +161,11 @@ void UGridMapComponent::AddObstacles(const TArray<FVector>& ObstaclePositions, f
     
     // Apply inflation to ensure safety margins
     InflateObstacles(InflationRadius);
+    
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(FVector::ZeroVector); // 或合适的位置参数
+    }
 }
 
 void UGridMapComponent::AddCylindricalObstacle(const FVector& Position, float Radius, float Height, float InInflationRadius)
@@ -226,6 +236,11 @@ void UGridMapComponent::AddCylindricalObstacle(const FVector& Position, float Ra
     
     // 应用膨胀
     InflateObstacles(InInflationRadius);
+    
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
+    }
 }
 
 void UGridMapComponent::AddCylindricalObstacles(const TArray<FVector>& Positions, float Radius, float Height, float InInflationRadius)
@@ -307,6 +322,11 @@ void UGridMapComponent::AddCylindricalObstacles(const TArray<FVector>& Positions
     
     // 应用膨胀
     InflateObstacles(InInflationRadius);
+    
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(FVector::ZeroVector); // 或合适的位置参数
+    }
 }
 
 bool UGridMapComponent::IsOccupied(const FVector& Position)
@@ -326,6 +346,11 @@ void UGridMapComponent::MarkAsOccupied(const FVector& Position)
     {
         OccupancyGrid[GridX][GridY][GridZ] = true;
     }
+    
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
+    }
 }
 
 void UGridMapComponent::MarkAsGround(const FVector& Position)
@@ -338,6 +363,11 @@ void UGridMapComponent::MarkAsGround(const FVector& Position)
         {
             OccupancyGrid[GridX][GridY][z] = true;
         }
+    }
+    
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
     }
 }
 
@@ -512,4 +542,14 @@ void UGridMapComponent::VisualizeRealObstacles(float Duration)
             2.0f // 线宽
         );
     }
+}
+
+void UGridMapComponent::ClearObstacles()
+{
+    for (int x = 0; x < GridDimX; x++)
+        for (int y = 0; y < GridDimY; y++)
+            for (int z = 0; z < GridDimZ; z++)
+                OccupancyGrid[x][y][z] = false;
+    if (OnGridMapUpdated.IsBound())
+        OnGridMapUpdated.Broadcast(FVector::ZeroVector);
 }

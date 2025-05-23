@@ -30,7 +30,7 @@ public:
     
     // 可视化路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
-    void VisualizePath(float Duration = 0.0f);
+    void VisualizePath(float Duration = 5.0f);
     
     // 将路径转换为Spline
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
@@ -95,6 +95,12 @@ public:
     // Chaikin曲线细分平滑算法声明
     void ChaikinSmoothPath(TArray<FVector>& Path, int Iterations);
 
+    // 新增：用于外部更新存储路径
+    UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
+    void UpdateStoredPath(const TArray<FVector>& NewPath);
+
+    void SetPath(const TArray<FVector>& InPath);
+
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -106,6 +112,7 @@ private:
     
     // 存储的路径
     TArray<FVector> StoredPath;
+    TArray<FVector> CurrentPath;
     
     // Spline组件引用
     UPROPERTY()

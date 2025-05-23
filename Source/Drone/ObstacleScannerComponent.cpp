@@ -64,6 +64,9 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
         return;
     }
 
+    // 每次扫描前清空地图
+    GridMap->ClearObstacles();
+
     // 获取无人机前向方向
     AActor* Owner = GetOwner();
     if (!Owner)
@@ -82,39 +85,7 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
     int32 NumPoints = FMath::CeilToInt(PI * Radius / RaycastSpacing);
     float AngleStep = PI / NumPoints;  // 180度 = PI
 
-    // 输出扫描参数
-    // UE_LOG(LogTemp, Warning, TEXT("扫描点数: %d"), NumPoints);
-
-    // // 可视化扫描范围
-    // if (bShowDebugVisualization)
-    // {
-    //     // 绘制扫描范围
-    //     DrawDebugCylinder(
-    //         GetWorld(),
-    //         Center,
-    //         Center + FVector(0, 0, Height),
-    //         Radius,
-    //         32,
-    //         FColor::Yellow,
-    //         false,
-    //         0.5f,
-    //         0,
-    //         1.0f
-    //     );
-
-    //     // 绘制扫描中心点
-    //     DrawDebugSphere(
-    //         GetWorld(),
-    //         Center,
-    //         20.0f,
-    //         12,
-    //         FColor::Yellow,
-    //         false,
-    //         0.5f,
-    //         0,
-    //         2.0f
-    //     );
-    // }
+   
 
     // 执行扫描
     for (int32 i = 0; i < NumPoints; i++)
@@ -126,20 +97,7 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
         FVector Start = Center + Direction * StartDistance;
         FVector End = Center + Direction * EndDistance;
 
-        // 可视化扫描线
-        // if (bShowDebugVisualization)
-        // {
-        //     DrawDebugLine(
-        //         GetWorld(),
-        //         Start,
-        //         End,
-        //         FColor::Blue,
-        //         false,
-        //         0.5f,
-        //         0,
-        //         0.5f
-        //     );
-        // }
+ 
 
         // 执行射线检测
         PerformRaycast(Start, End);
@@ -375,3 +333,6 @@ void UObstacleScannerComponent::VisualizeScanResults(const FVector& Center, floa
         );
     }
 }
+
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
+float ScanInterval = 0.5f; // 修改为5.0秒
