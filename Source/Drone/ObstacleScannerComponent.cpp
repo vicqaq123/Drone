@@ -49,6 +49,12 @@ void UObstacleScannerComponent::TickComponent(float DeltaTime, ELevelTick TickTy
             }
         }
     }
+
+    // 每一帧都绘制所有障碍物
+    if (GridMap)
+    {
+        DrawAllObstacles();
+    }
 }
 
 void UObstacleScannerComponent::SetGridMap(UGridMapComponent* InGridMap)
@@ -65,7 +71,7 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
     }
 
     // 每次扫描前清空地图
-    GridMap->ClearObstacles();
+    // GridMap->ClearObstacles();
 
     // 获取无人机前向方向
     AActor* Owner = GetOwner();
@@ -78,7 +84,7 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
     FVector UpVector = FVector::CrossProduct(ForwardVector, RightVector);
 
     // 计算扫描范围
-    float StartDistance = 50.0f;  // 从无人机前方50厘米开始扫描
+    float StartDistance = 110.0f;  // 从无人机前方50厘米开始扫描
     float EndDistance = Radius;   // 扫描到最大半径
     
     // 计算水平扫描点数量（180度）
@@ -96,9 +102,6 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
         // 计算扫描起点和终点
         FVector Start = Center + Direction * StartDistance;
         FVector End = Center + Direction * EndDistance;
-
- 
-
         // 执行射线检测
         PerformRaycast(Start, End);
     }
@@ -117,14 +120,12 @@ void UObstacleScannerComponent::PerformRaycast(const FVector& Start, const FVect
 {
     if (!GetWorld())
         return;
-
     FHitResult HitResult;
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(GetOwner());
-    QueryParams.bTraceComplex = true;  // 使用复杂碰撞检测
-    QueryParams.bReturnPhysicalMaterial = true;  // 返回物理材质信息
+    QueryParams.bTraceComplex = true;
+    QueryParams.bReturnPhysicalMaterial = true;
 
-    // 执行射线检测
     bool bHit = GetWorld()->LineTraceSingleByChannel(
         HitResult,
         Start,
@@ -132,27 +133,19 @@ void UObstacleScannerComponent::PerformRaycast(const FVector& Start, const FVect
         ECC_Visibility,
         QueryParams
     );
-
+    
     if (bHit)
     {
         // 检查是否是地面（z接近0）
         if (FMath::Abs(HitResult.Location.Z) < 1.0f)
         {
-            // 是地面，不输出日志，只更新网格
+            // 是地面，直接更新网格
             UpdateGridMap(HitResult.Location, false);
             return;
         }
 
-        // // 输出障碍物信息
-        // if (HitResult.GetActor())
-        // {
-        //     UE_LOG(LogTemp, Warning, TEXT("检测到障碍物: %s"), *HitResult.GetActor()->GetName());
-        //     UE_LOG(LogTemp, Warning, TEXT("障碍物位置: %s"), *HitResult.Location.ToString());
-        //     UE_LOG(LogTemp, Warning, TEXT("障碍物类型: %s"), *HitResult.GetActor()->GetClass()->GetName());
-        // }
-
-        // 更新网格地图
         UpdateGridMap(HitResult.Location, true);
+        // UE_LOG(LogTemp, Warning, TEXT("[ObstacleScanner] 检测到障碍物，位置: %s"), *HitResult.Location.ToString());
 
         // 调试可视化
         if (bShowDebugVisualization)
@@ -180,27 +173,8 @@ void UObstacleScannerComponent::PerformRaycast(const FVector& Start, const FVect
             );
         }
     }
-    else
-    {
-        // 如果没有击中任何物体，标记为地面（不输出日志）
-        UpdateGridMap(End, false);
-
-        // 调试可视化
-        if (bShowDebugVisualization)
-        {
-            DrawDebugLine(
-                GetWorld(),
-                Start,
-                End,
-                FColor::Green,
-                false,
-                0.5f,
-                0,
-                1.0f
-            );
-        }
-    }
 }
+
 
 void UObstacleScannerComponent::UpdateGridMap(const FVector& HitLocation, bool bIsObstacle)
 {
@@ -211,10 +185,51 @@ void UObstacleScannerComponent::UpdateGridMap(const FVector& HitLocation, bool b
     int32 GridX, GridY, GridZ;
     if (GridMap->WorldToGrid(HitLocation, GridX, GridY, GridZ))
     {
-        // 更新网格状态
         if (bIsObstacle)
         {
+            // 对障碍物进行膨胀处理
+            float InflationRadius = 50.0f;  // 膨胀半径
+            int32 NumPoints = 16;  // 在水平面上检查8个方向
+            float AngleStep = 2.0f * PI / NumPoints;
+            
+            // 标记原始障碍物位置
             GridMap->MarkAsOccupied(HitLocation);
+            
+            // 在水平面上进行膨胀
+            for (int32 i = 0; i < NumPoints; i++)
+            {
+                float Angle = i * AngleStep;
+                FVector Offset(
+                    FMath::Cos(Angle) * InflationRadius,
+                    FMath::Sin(Angle) * InflationRadius,
+                    0.0f
+                );
+                FVector InflatedPoint = HitLocation + Offset;
+                GridMap->MarkAsOccupied(InflatedPoint);
+                
+                // 绘制膨胀后的障碍物点
+                if (GetWorld())
+                {
+                    DrawDebugSphere(
+                        GetWorld(),
+                        InflatedPoint,
+                        10.0f,  // 球体半径
+                        8,      // 球体分段数
+                        FColor::Blue,  // 蓝色
+                        false,  // 不持久化
+                        5.0f,   // 持续时间5秒
+                        0,      // 深度优先级
+                        1.0f    // 线条粗细
+                    );
+                }
+            }
+            
+            // 垂直方向膨胀（只在必要时）
+            if (FMath::Abs(HitLocation.Z) > 1.0f)
+            {
+                GridMap->MarkAsOccupied(HitLocation + FVector(0, 0, InflationRadius * 0.5f));
+                GridMap->MarkAsOccupied(HitLocation + FVector(0, 0, -InflationRadius * 0.5f));
+            }
         }
         else
         {
@@ -336,3 +351,30 @@ void UObstacleScannerComponent::VisualizeScanResults(const FVector& Center, floa
 
 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
 float ScanInterval = 0.5f; // 修改为5.0秒
+
+// 添加新函数用于绘制所有障碍物
+void UObstacleScannerComponent::DrawAllObstacles()
+{
+    if (!GridMap || !GetWorld())
+        return;
+
+    // 获取所有被占用的网格点
+    TArray<FVector> OccupiedPoints;
+    GridMap->GetAllOccupiedPoints(OccupiedPoints);
+
+    // 绘制每个被占用的点
+    for (const FVector& Point : OccupiedPoints)
+    {
+        DrawDebugSphere(
+            GetWorld(),
+            Point,
+            10.0f,  // 球体半径
+            8,      // 球体分段数
+            FColor::Blue,  // 蓝色
+            false,  // 不持久化
+            -1.0f,  // 持续到下一帧
+            0,      // 深度优先级
+            1.0f    // 线条粗细
+        );
+    }
+}

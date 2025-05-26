@@ -1,5 +1,7 @@
-#include "CoreMinimal.h"
 #include "PathModifierComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "CoreMinimal.h"
 #include "GridMapComponent.h"
 #include "AStarPathFinderComponent.h"
 
@@ -42,12 +44,13 @@ void UPathModifierComponent::BeginPlay()
 void UPathModifierComponent::SetPath(const TArray<FVector>& InPath)
 {
     CurrentPath = InPath;
-    UE_LOG(LogTemp, Warning, TEXT("[PathModifier] SetPath 被调用，路径点数: %d"), CurrentPath.Num());
-    for (int32 i = 0; i < CurrentPath.Num(); ++i)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径点[%d]: %s"), i, *CurrentPath[i].ToString());
-    }
+    UE_LOG(LogTemp, Warning, TEXT("[PathModifier] SetPath 被调用"));
+    // for (int32 i = 0; i < CurrentPath.Num(); ++i)
+    // {
+    //     UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径点[%d]: %s"), i, *CurrentPath[i].ToString());
+    // }
 }
+
 
 void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
 {
@@ -59,20 +62,22 @@ void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
     }
     
     bIsProcessing = true;
+    // UE_LOG(LogTemp, Log, TEXT("[PathModifier] 开始处理地图更新"));
     
     // 检查路径是否被障碍物阻挡
     bool bIsPathBlocked = false;
+    
     for (int32 i = 0; i < CurrentPath.Num(); ++i)
     {
-        if (GridMap->IsOccupied(CurrentPath[i]))
+        const FVector& PathPoint = CurrentPath[i];
+            
+        if (GridMap->IsOccupied(PathPoint))
         {
             bIsPathBlocked = true;
-            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 检测到障碍物阻挡路径，位置: %s"), *CurrentPath[i].ToString());
+            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 检测到障碍物在安全距离内，位置: %s"), 
+                *PathPoint.ToString());
+            break;
         }
-        // else
-        // {
-        //     UE_LOG(LogTemp, Log, TEXT("[PathModifier] 路径点未被阻挡，位置: %s"), *CurrentPath[i].ToString());
-        // }
     }
     
     // 只有当路径被阻挡时，才进行路径重规划
@@ -90,28 +95,44 @@ void UPathModifierComponent::CheckAndModifyPath()
     if (!GridMap || !AStar || CurrentPath.Num() == 0)
         return;
 
+    // 添加重规划次数限制
+    static int32 ReplanCount = 0;
+    if (ReplanCount >= 3)  // 最多重试3次
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 达到最大重规划次数，停止重规划"));
+        ReplanCount = 0;
+        return;
+    }
+    ReplanCount++;
+
     // 1. 获取当前位置（无人机Actor的位置）
     FVector CurrentPos = GetOwner() ? GetOwner()->GetActorLocation() : CurrentPath[0];
-
-    // 2. 找到原路径上距离当前位置最近且未被阻挡的点索引
-    int32 ClosestIdx = 0;
+    int32 CurrentPosIndex = -1;  // 初始化为-1表示未找到有效索引
     float MinDist = TNumericLimits<float>::Max();
+    
+    // 找到距离当前位置最近的路径点索引，但只能在当前位置之前
     for (int32 i = 0; i < CurrentPath.Num(); ++i)
     {
-        if (!GridMap->IsOccupied(CurrentPath[i]))
+        // 计算当前路径点到无人机位置的距离
+        float Dist = FVector::Dist(CurrentPos, CurrentPath[i]);
+        
+        // 如果当前点比之前找到的最近点更近，且该点在当前位置之前
+        if (Dist < MinDist && CurrentPath[i].X <= CurrentPos.X)
         {
-            float Dist = FVector::Dist(CurrentPath[i], CurrentPos);
-            if (Dist < MinDist)
-            {
-                MinDist = Dist;
-                ClosestIdx = i;
-            }
+            MinDist = Dist;
+            CurrentPosIndex = i;
         }
+    }
+    
+    // 如果没有找到有效索引，使用第一个点
+    if (CurrentPosIndex == -1)
+    {
+        CurrentPosIndex = 0;
     }
 
     // 3. 保存数组1（起点到当前位置的路径）
     TArray<FVector> PathToCurrent;
-    for (int32 i = 0; i <= ClosestIdx; ++i)
+    for (int32 i = 0; i <= CurrentPosIndex; ++i)
     {
         PathToCurrent.Add(CurrentPath[i]);
     }
@@ -119,28 +140,50 @@ void UPathModifierComponent::CheckAndModifyPath()
     // 4. 重新规划当前位置到终点的路径
     FVector Goal = CurrentPath.Last();
     TArray<FVector> NewPath;
-    if (AStar->FindPath(CurrentPos, Goal, NewPath) && NewPath.Num() > 0)
+    if (AStar->FindPath(CurrentPath[CurrentPosIndex], Goal, NewPath) && NewPath.Num() > 0)
     {
-        // 5. 拼接
-        // 如果PathToCurrent最后一个点和NewPath第一个点很近，去掉NewPath第一个点
-        if (PathToCurrent.Num() > 0 && FVector::Dist(PathToCurrent.Last(), NewPath[0]) < 1.0f)
-        {
-            NewPath.RemoveAt(0);
-        }
         PathToCurrent.Append(NewPath);
 
-        // 日志：输出新路径点
-        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 调用AStar->UpdateStoredPath，路径点数: %d"), PathToCurrent.Num());
-        for (int32 i = 0; i < PathToCurrent.Num(); ++i)
+        // 检查新路径是否安全
+        bool bIsPathSafe = true;
+        for (const FVector& Point : PathToCurrent)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 新路径点[%d]: %s"), i, *PathToCurrent[i].ToString());
+            if (GridMap->IsOccupied(Point))
+            {
+                bIsPathSafe = false;
+                UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 新路径上存在障碍物，位置: %s"), *Point.ToString());
+                break;
+            }
         }
-        AStar->UpdateStoredPath(PathToCurrent);
-        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 已调用AStar->UpdateStoredPath"));
-        AStar->CreatePathSpline();
-        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 已调用AStar->CreatePathSpline()，轨迹已更新"));
-        CurrentPath = PathToCurrent;
-        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径重规划并拼接完成，总点数: %d"), CurrentPath.Num());
+
+        // 只有当路径安全时才更新
+        if (bIsPathSafe)
+        {
+            AStar->UpdateStoredPath(PathToCurrent);
+            AStar->CreatePathSpline();
+            CurrentPath = PathToCurrent;
+            ReplanCount = 0;  // 重置重规划计数
+            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径重规划并拼接完成，总点数: %d"), PathToCurrent.Num());
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 新路径不安全，尝试寻找替代路径"));
+            // 尝试寻找替代路径
+            FVector AlternativeGoal = GetNextValidGoal();
+            if (AlternativeGoal != CurrentPath[CurrentPosIndex])  // 确保不是当前点
+            {
+                TArray<FVector> AltPath;
+                if (AStar->FindPath(CurrentPath[CurrentPosIndex], AlternativeGoal, AltPath) && AltPath.Num() > 0)
+                {
+                    PathToCurrent = AltPath;
+                    AStar->UpdateStoredPath(PathToCurrent);
+                    AStar->CreatePathSpline();
+                    CurrentPath = PathToCurrent;
+                    ReplanCount = 0;  // 重置重规划计数
+                    UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 找到替代路径，总点数: %d"), PathToCurrent.Num());
+                }
+            }
+        }
     }
     else
     {

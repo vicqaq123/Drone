@@ -25,6 +25,10 @@ public:
     UFUNCTION(BlueprintCallable)
     void CheckAndModifyPath();
 
+    // // 检查点是否在安全距离内
+    // UFUNCTION(BlueprintCallable)
+    // bool IsPointSafeWithDistance(const FVector& Point, float SafetyDistance) const;
+
 protected:
     UPROPERTY()
     UGridMapComponent* GridMap;

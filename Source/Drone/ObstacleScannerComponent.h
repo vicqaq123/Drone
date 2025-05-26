@@ -47,13 +47,27 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|Scanner")
     bool bShowDebugVisualization = true;
 
+
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
+    float ObstacleInflationRadius2 = 30.0f; // 障碍物膨胀半径
+
     // 扫描间隔（秒）
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
-    float ScanInterval = 0.1f;
+    float ScanInterval = 0.5f;
 
     // 自动扫描开关
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
     bool bAutoScan = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
+    float ScannerObstacleInflationRadius = 60.0f; // 扫描器障碍物膨胀半径
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
+    float ObstacleUpdateTolerance = 10.0f; // 障碍物更新容差范围
+
+    // 绘制所有障碍物
+    void DrawAllObstacles();
 
 protected:
     virtual void BeginPlay() override;
@@ -67,11 +81,14 @@ private:
     // 上次扫描后经过的时间
     float TimeSinceLastScan = 0.0f;
 
+
     // 执行射线检测
     void PerformRaycast(const FVector& Start, const FVector& End);
 
     // 更新网格地图
     void UpdateGridMap(const FVector& HitLocation, bool bIsObstacle);
+
+
 
     // 可视化扫描结果
     void VisualizeScanResults(const FVector& Center, float Radius, float Height);

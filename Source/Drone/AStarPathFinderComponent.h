@@ -16,21 +16,15 @@ public:
     // 设置默认值
     UAStarPathFinderComponent();
 
-    // 设置网格地图组件引用
-    UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
-    void SetGridMap(UGridMapComponent* InGridMap);
     
     // 寻找从起点到终点的路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
     bool FindPath(const FVector& Start, const FVector& Goal, TArray<FVector>& OutPath);
     
-    // 获取保存的路径
-    UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
-    TArray<FVector> GetSearchedPath();
     
     // 可视化路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
-    void VisualizePath(float Duration = 5.0f);
+    void VisualizePath(float Duration = 100.0f);
     
     // 将路径转换为Spline
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
@@ -63,26 +57,6 @@ public:
     // 设置线条透明度
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar", meta=(ClampMin="0.0", ClampMax="1.0"))
     float LineOpacity = 0.8f;
-    
-    // 获取存储的样条曲线点
-    UFUNCTION(BlueprintCallable, Category = "PathPlanning|AStar")
-    TArray<FVector> GetStoredSplinePoints() const;
-    
-    // 获取存储的样条曲线长度
-    UFUNCTION(BlueprintCallable, Category = "PathPlanning|AStar")
-    float GetStoredSplineLength() const;
-    
-    // 获取样条曲线上的点
-    UFUNCTION(BlueprintCallable, Category = "PathPlanning|AStar")
-    FVector GetLocationAlongSpline(float Distance) const;
-    
-    // 获取样条曲线上的位置和方向
-    UFUNCTION(BlueprintCallable, Category = "PathPlanning|AStar")
-    FTransform GetTransformAlongSpline(float Distance) const;
-    
-    // 获取样条曲线上的速度
-    UFUNCTION(BlueprintCallable, Category = "PathPlanning|AStar")
-    FVector GetVelocityAlongSpline(float Distance, float DeltaTime) const;
 
     // 设置无人机尺寸
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")

@@ -36,14 +36,6 @@ public:
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
     void UpdateObstaclesFromScene(float DetectionRadius);
     
-    // Manually add obstacles
-    UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
-    void AddObstacles(const TArray<FVector>& ObstaclePositions, float InflationRadius = 0.3f);
-
-    // 在GridMapComponent.h中添加新方法声明
-    UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
-    void AddCylindricalObstacle(const FVector& Position, float Radius, float Height, float InflationRadius = 0.3f);
-    
     // 添加批量添加圆柱形障碍物的函数声明
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
     void AddCylindricalObstacles(const TArray<FVector>& Positions, float Radius, float Height, float InflationRadius = 0.3f);
@@ -77,7 +69,7 @@ public:
     bool WorldToGrid(const FVector& WorldPos, int32& GridX, int32& GridY, int32& GridZ);
     
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
-    FVector GridToWorld(int32 GridX, int32 GridY, int32 GridZ);
+    FVector GridToWorld(int32 GridX, int32 GridY, int32 GridZ) const;
     
     // Get resolution
     UFUNCTION(BlueprintPure, Category="PathPlanning|GridMap")
@@ -114,6 +106,9 @@ public:
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
     void ClearObstacles();
     
+    // 获取所有被占用的点
+    void GetAllOccupiedPoints(TArray<FVector>& OutPoints) const;
+    
 private:
     // Grid map data
     TArray<TArray<TArray<bool>>> OccupancyGrid;
@@ -130,6 +125,6 @@ private:
     TArray<FCylinderObstacle> CylinderObstacles;
     
     // Helper methods
-    void MarkCellsInBox(const FVector& Min, const FVector& Max);
-    void InflateObstacles(float Radius);
+    bool MarkCellsInBox(const FVector& Min, const FVector& Max);
+    bool InflateObstacles(float Radius);
 };
