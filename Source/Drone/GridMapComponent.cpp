@@ -87,66 +87,6 @@ void UGridMapComponent::InitializeMap(FVector Origin, FVector Size, float Resolu
     
 }
 
-void UGridMapComponent::UpdateObstaclesFromScene(float DetectionRadius)
-{
-    if (GridDimX == 0 || GridDimY == 0 || GridDimZ == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Grid map not initialized"));
-        return;
-    }
-    
-    // // Clear previous occupancy data
-    // for (int x = 0; x < GridDimX; x++)
-    // {
-    //     for (int y = 0; y < GridDimY; y++)
-    //     {
-    //         for (int z = 0; z < GridDimZ; z++)
-    //         {
-    //             OccupancyGrid[x][y][z] = false;
-    //         }
-    //     }
-    // }
-    
-    // Get all actors in scene
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
-    
-    // Filter for obstacle actors
-    bool bHasUpdate = false;  // 添加更新标志
-    for (AActor* Actor : FoundActors)
-    {
-        // Skip self and owner
-        if (Actor == GetOwner() || IgnoredActors.Contains(Actor))
-            continue;
-            
-        // Consider static meshes and actors with "Obstacle" tag as obstacles
-        if (Actor->ActorHasTag(FName("Obstacle")) || Actor->IsA(AStaticMeshActor::StaticClass()))
-        {
-            // Get bounds
-            FVector Origin, Extent;
-            Actor->GetActorBounds(true, Origin, Extent);
-            
-            // Mark cells as occupied
-            if (MarkCellsInBox(Origin - Extent, Origin + Extent))
-            {
-                bHasUpdate = true;  // 如果有格子被标记，设置更新标志
-            }
-        }
-    }
-    
-    // Apply inflation to ensure safety margins
-    if (InflateObstacles(InflationRadius))
-    {
-        bHasUpdate = true;  // 如果膨胀操作有更新，设置更新标志
-    }
-    
-    // 只有在有更新时才触发事件
-    if (bHasUpdate && OnGridMapUpdated.IsBound())
-    {
-        OnGridMapUpdated.Broadcast(FVector::ZeroVector);
-    }
-}
-
 
 void UGridMapComponent::AddCylindricalObstacles(const TArray<FVector>& Positions, float Radius, float Height, float InInflationRadius)
 {
@@ -250,11 +190,14 @@ void UGridMapComponent::MarkAsOccupied(const FVector& Position)
     if (WorldToGrid(Position, GridX, GridY, GridZ))
     {
         OccupancyGrid[GridX][GridY][GridZ] = true;
+        UE_LOG(LogTemp, Warning, TEXT("已经更新障碍物 (%.2f, %.2f, %.2f)"),Position.X, Position.Y, Position.Z);
     }
     
     if (OnGridMapUpdated.IsBound())
     {
-        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
+        OnGridMapUpdated.Broadcast(Position);
+        // UE_LOG(LogTemp, Warning, TEXT("GridMap: 广播地图更新事件，位置: (%.2f, %.2f, %.2f)"), 
+        //     Position.X, Position.Y, Position.Z);
     }
 }
 
@@ -263,16 +206,26 @@ void UGridMapComponent::MarkAsGround(const FVector& Position)
     int32 GridX, GridY, GridZ;
     if (WorldToGrid(Position, GridX, GridY, GridZ))
     {
-        // 标记地面及其下方的所有格子为障碍物
-        for (int32 z = 0; z <= GridZ; z++)
+        // 将指定位置标记为地面
+        if (GridX >= 0 && GridX < GridDimX &&
+            GridY >= 0 && GridY < GridDimY &&
+            GridZ >= 0 && GridZ < GridDimZ)
         {
-            OccupancyGrid[GridX][GridY][z] = true;
+            // 将网格标记为地面（非障碍物）
+            OccupancyGrid[GridX][GridY][GridZ] = false;
+            UE_LOG(LogTemp, Log, TEXT("GridMap: 位置 (%.2f, %.2f, %.2f) 已标记为地面"), 
+                Position.X, Position.Y, Position.Z);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("GridMap: 无效的网格索引 (%d, %d, %d)"), 
+                GridX, GridY, GridZ);
         }
     }
-    
-    if (OnGridMapUpdated.IsBound())
+    else
     {
-        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
+        UE_LOG(LogTemp, Warning, TEXT("GridMap: 无法将位置 (%.2f, %.2f, %.2f) 转换为网格索引"), 
+            Position.X, Position.Y, Position.Z);
     }
 }
 
@@ -334,7 +287,7 @@ bool UGridMapComponent::WorldToGrid(const FVector& WorldPos, int32& GridX, int32
     return true;
 }
 
-FVector UGridMapComponent::GridToWorld(int32 GridX, int32 GridY, int32 GridZ) const
+FVector UGridMapComponent::GridToWorld(int32 GridX, int32 GridY, int32 GridZ)
 {
     // 计算网格中心点的世界坐标
     FVector WorldPos;
@@ -345,47 +298,6 @@ FVector UGridMapComponent::GridToWorld(int32 GridX, int32 GridY, int32 GridZ) co
     return WorldPos;
 }
 
-bool UGridMapComponent::MarkCellsInBox(const FVector& Min, const FVector& Max)
-{
-    bool bHasUpdate = false;
-    
-    // Convert bounds to grid coordinates
-    int MinX, MinY, MinZ;
-    int MaxX, MaxY, MaxZ;
-    
-    bool MinValid = WorldToGrid(Min, MinX, MinY, MinZ);
-    bool MaxValid = WorldToGrid(Max, MaxX, MaxY, MaxZ);
-    
-    if (!MinValid && !MaxValid)
-        return false;
-    
-    // Clamp to grid bounds
-    MinX = FMath::Clamp(MinX, 0, GridDimX-1);
-    MinY = FMath::Clamp(MinY, 0, GridDimY-1);
-    MinZ = FMath::Clamp(MinZ, 0, GridDimZ-1);
-    
-    MaxX = FMath::Clamp(MaxX, 0, GridDimX-1);
-    MaxY = FMath::Clamp(MaxY, 0, GridDimY-1);
-    MaxZ = FMath::Clamp(MaxZ, 0, GridDimZ-1);
-    
-    // Mark cells as occupied
-    for (int x = MinX; x <= MaxX; x++)
-    {
-        for (int y = MinY; y <= MaxY; y++)
-        {
-            for (int z = MinZ; z <= MaxZ; z++)
-            {
-                if (!OccupancyGrid[x][y][z])  // 如果格子之前未被占用
-                {
-                    OccupancyGrid[x][y][z] = true;
-                    bHasUpdate = true;
-                }
-            }
-        }
-    }
-    
-    return bHasUpdate;
-}
 
 bool UGridMapComponent::InflateObstacles(float Radius)
 {
@@ -468,26 +380,4 @@ void UGridMapComponent::ClearObstacles()
                 OccupancyGrid[x][y][z] = false;
     if (OnGridMapUpdated.IsBound())
         OnGridMapUpdated.Broadcast(FVector::ZeroVector);
-}
-
-void UGridMapComponent::GetAllOccupiedPoints(TArray<FVector>& OutPoints) const
-{
-    OutPoints.Empty();
-    
-    // 遍历所有网格点
-    for (int32 X = 0; X < GridDimX; X++)
-    {
-        for (int32 Y = 0; Y < GridDimY; Y++)
-        {
-            for (int32 Z = 0; Z < GridDimZ; Z++)
-            {
-                // 如果点被占用，将其世界坐标添加到输出数组
-                if (OccupancyGrid[X][Y][Z])  // 1表示被占用
-                {
-                    FVector WorldPos = GridToWorld(X, Y, Z);
-                    OutPoints.Add(WorldPos);
-                }
-            }
-        }
-    }
 }

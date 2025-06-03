@@ -50,11 +50,11 @@ void UObstacleScannerComponent::TickComponent(float DeltaTime, ELevelTick TickTy
         }
     }
 
-    // 每一帧都绘制所有障碍物
-    if (GridMap)
-    {
-        DrawAllObstacles();
-    }
+    // // 每一帧都绘制所有障碍物
+    // if (GridMap)
+    // {
+    //     DrawAllObstacles();
+    // }
 }
 
 void UObstacleScannerComponent::SetGridMap(UGridMapComponent* InGridMap)
@@ -84,14 +84,12 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
     FVector UpVector = FVector::CrossProduct(ForwardVector, RightVector);
 
     // 计算扫描范围
-    float StartDistance = 110.0f;  // 从无人机前方50厘米开始扫描
+    float StartDistance = 50.0f;  // 从无人机前方50厘米开始扫描
     float EndDistance = Radius;   // 扫描到最大半径
     
     // 计算水平扫描点数量（180度）
     int32 NumPoints = FMath::CeilToInt(PI * Radius / RaycastSpacing);
     float AngleStep = PI / NumPoints;  // 180度 = PI
-
-   
 
     // 执行扫描
     for (int32 i = 0; i < NumPoints; i++)
@@ -99,9 +97,12 @@ void UObstacleScannerComponent::ScanArea(const FVector& Center, float Radius, fl
         float Angle = i * AngleStep - PI/2;  // 从-90度到90度
         FVector Direction = ForwardVector * FMath::Cos(Angle) + RightVector * FMath::Sin(Angle);
         
-        // 计算扫描起点和终点
+        // 计算扫描起点和终点，使用无人机当前高度
         FVector Start = Center + Direction * StartDistance;
         FVector End = Center + Direction * EndDistance;
+        Start.Z = Center.Z;  // 使用无人机当前高度
+        End.Z = Center.Z;    // 使用无人机当前高度
+        
         // 执行射线检测
         PerformRaycast(Start, End);
     }
@@ -145,7 +146,7 @@ void UObstacleScannerComponent::PerformRaycast(const FVector& Start, const FVect
         }
 
         UpdateGridMap(HitResult.Location, true);
-        // UE_LOG(LogTemp, Warning, TEXT("[ObstacleScanner] 检测到障碍物，位置: %s"), *HitResult.Location.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("[ObstacleScanner] 检测到障碍物，位置: %s"), *HitResult.Location.ToString());
 
         // 调试可视化
         if (bShowDebugVisualization)
@@ -188,52 +189,47 @@ void UObstacleScannerComponent::UpdateGridMap(const FVector& HitLocation, bool b
         if (bIsObstacle)
         {
             // 对障碍物进行膨胀处理
-            float InflationRadius = 50.0f;  // 膨胀半径
-            int32 NumPoints = 16;  // 在水平面上检查8个方向
-            float AngleStep = 2.0f * PI / NumPoints;
+            float InflationRadius = 100.0f;  // 膨胀半径
+            float CellSize = 5.0f;  // 使用固定的网格大小
+            int32 InflationCells = FMath::CeilToInt(InflationRadius / CellSize);  // 转换为网格数量
             
-            // 标记原始障碍物位置
-            GridMap->MarkAsOccupied(HitLocation);
-            
-            // 在水平面上进行膨胀
-            for (int32 i = 0; i < NumPoints; i++)
+            // 遍历膨胀范围内的所有网格点
+            for (int32 dx = -InflationCells; dx <= InflationCells; dx++)
             {
-                float Angle = i * AngleStep;
-                FVector Offset(
-                    FMath::Cos(Angle) * InflationRadius,
-                    FMath::Sin(Angle) * InflationRadius,
-                    0.0f
-                );
-                FVector InflatedPoint = HitLocation + Offset;
-                GridMap->MarkAsOccupied(InflatedPoint);
-                
-                // 绘制膨胀后的障碍物点
-                if (GetWorld())
+                for (int32 dy = -InflationCells; dy <= InflationCells; dy++)
                 {
-                    DrawDebugSphere(
-                        GetWorld(),
-                        InflatedPoint,
-                        10.0f,  // 球体半径
-                        8,      // 球体分段数
-                        FColor::Blue,  // 蓝色
-                        false,  // 不持久化
-                        5.0f,   // 持续时间5秒
-                        0,      // 深度优先级
-                        1.0f    // 线条粗细
-                    );
+                    // 计算到中心的距离
+                    float Distance = FMath::Sqrt(static_cast<float>(dx * dx + dy * dy)) * CellSize;
+                    if (Distance <= InflationRadius)
+                    {
+                        // 计算膨胀点的网格坐标
+                        int32 InflatedGridX = GridX + dx;
+                        int32 InflatedGridY = GridY + dy;
+                        int32 InflatedGridZ = GridZ;
+
+                        // 将网格坐标转换为世界坐标
+                        FVector InflatedPoint = GridMap->GridToWorld(InflatedGridX, InflatedGridY, InflatedGridZ);
+                        GridMap->MarkAsOccupied(InflatedPoint);
+                    }
                 }
             }
             
             // 垂直方向膨胀（只在必要时）
             if (FMath::Abs(HitLocation.Z) > 1.0f)
             {
-                GridMap->MarkAsOccupied(HitLocation + FVector(0, 0, InflationRadius * 0.5f));
-                GridMap->MarkAsOccupied(HitLocation + FVector(0, 0, -InflationRadius * 0.5f));
+                int32 VerticalCells = FMath::CeilToInt(InflationRadius * 0.5f / CellSize);
+                for (int32 dz = -VerticalCells; dz <= VerticalCells; dz++)
+                {
+                    // 计算膨胀点的网格坐标
+                    int32 InflatedGridX = GridX;
+                    int32 InflatedGridY = GridY;
+                    int32 InflatedGridZ = GridZ + dz;
+
+                    // 将网格坐标转换为世界坐标
+                    FVector InflatedPoint = GridMap->GridToWorld(InflatedGridX, InflatedGridY, InflatedGridZ);
+                    GridMap->MarkAsOccupied(InflatedPoint);
+                }
             }
-        }
-        else
-        {
-            GridMap->MarkAsGround(HitLocation);
         }
     }
 }
@@ -353,28 +349,28 @@ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
 float ScanInterval = 0.5f; // 修改为5.0秒
 
 // 添加新函数用于绘制所有障碍物
-void UObstacleScannerComponent::DrawAllObstacles()
-{
-    if (!GridMap || !GetWorld())
-        return;
+// void UObstacleScannerComponent::DrawAllObstacles()
+// {
+//     if (!GridMap || !GetWorld())
+//         return;
 
-    // 获取所有被占用的网格点
-    TArray<FVector> OccupiedPoints;
-    GridMap->GetAllOccupiedPoints(OccupiedPoints);
+//     // 获取所有被占用的网格点
+//     TArray<FVector> OccupiedPoints;
+//     GridMap->GetAllOccupiedPoints(OccupiedPoints);
 
-    // 绘制每个被占用的点
-    for (const FVector& Point : OccupiedPoints)
-    {
-        DrawDebugSphere(
-            GetWorld(),
-            Point,
-            10.0f,  // 球体半径
-            8,      // 球体分段数
-            FColor::Blue,  // 蓝色
-            false,  // 不持久化
-            -1.0f,  // 持续到下一帧
-            0,      // 深度优先级
-            1.0f    // 线条粗细
-        );
-    }
-}
+//     // 绘制每个被占用的点
+//     for (const FVector& Point : OccupiedPoints)
+//     {
+//         DrawDebugSphere(
+//             GetWorld(),
+//             Point,
+//             10.0f,  // 球体半径
+//             8,      // 球体分段数
+//             FColor::Blue,  // 蓝色
+//             false,  // 不持久化
+//             -1.0f,  // 持续到下一帧
+//             0,      // 深度优先级
+//             1.0f    // 线条粗细
+//         );
+//     }
+// }

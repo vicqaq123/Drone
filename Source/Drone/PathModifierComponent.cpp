@@ -51,32 +51,29 @@ void UPathModifierComponent::SetPath(const TArray<FVector>& InPath)
     // }
 }
 
-
 void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
 {
     // 防止重复处理
+    // UE_LOG(LogTemp, Warning, TEXT("[PathModifier] OnGridUpdated 被调用，更新位置: %s"), *UpdatedLocation.ToString());
+    
     static bool bIsProcessing = false;
     if (bIsProcessing)
     {
+        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 正在处理中，跳过本次更新"));
         return;
     }
     
     bIsProcessing = true;
-    // UE_LOG(LogTemp, Log, TEXT("[PathModifier] 开始处理地图更新"));
     
     // 检查路径是否被障碍物阻挡
     bool bIsPathBlocked = false;
-    
     for (int32 i = 0; i < CurrentPath.Num(); ++i)
     {
-        const FVector& PathPoint = CurrentPath[i];
-            
-        if (GridMap->IsOccupied(PathPoint))
+        if (GridMap->IsOccupied(CurrentPath[i]))
         {
             bIsPathBlocked = true;
-            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 检测到障碍物在安全距离内，位置: %s"), 
-                *PathPoint.ToString());
-            break;
+            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 检测到障碍物阻挡路径，位置: %s"), *CurrentPath[i].ToString());
+            break;  // 找到一个阻挡点就退出循环
         }
     }
     
@@ -86,6 +83,10 @@ void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
         UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 检测到障碍物阻挡路径，执行路径重规划"));
         CheckAndModifyPath();
     }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径未被阻挡，无需重规划"));
+    }
     
     bIsProcessing = false;
 }
@@ -94,16 +95,6 @@ void UPathModifierComponent::CheckAndModifyPath()
 {
     if (!GridMap || !AStar || CurrentPath.Num() == 0)
         return;
-
-    // 添加重规划次数限制
-    static int32 ReplanCount = 0;
-    if (ReplanCount >= 3)  // 最多重试3次
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 达到最大重规划次数，停止重规划"));
-        ReplanCount = 0;
-        return;
-    }
-    ReplanCount++;
 
     // 1. 获取当前位置（无人机Actor的位置）
     FVector CurrentPos = GetOwner() ? GetOwner()->GetActorLocation() : CurrentPath[0];
@@ -129,7 +120,6 @@ void UPathModifierComponent::CheckAndModifyPath()
     {
         CurrentPosIndex = 0;
     }
-
     // 3. 保存数组1（起点到当前位置的路径）
     TArray<FVector> PathToCurrent;
     for (int32 i = 0; i <= CurrentPosIndex; ++i)
@@ -140,8 +130,12 @@ void UPathModifierComponent::CheckAndModifyPath()
     // 4. 重新规划当前位置到终点的路径
     FVector Goal = CurrentPath.Last();
     TArray<FVector> NewPath;
-    if (AStar->FindPath(CurrentPath[CurrentPosIndex], Goal, NewPath) && NewPath.Num() > 0)
+    if (AStar->FindPath(CurrentPos, Goal, NewPath) && NewPath.Num() > 0)
     {
+        if (PathToCurrent.Num() > 0 && FVector::Dist(PathToCurrent.Last(), NewPath[0]) < 1.0f)
+        {
+            NewPath.RemoveAt(0);
+        }
         PathToCurrent.Append(NewPath);
 
         // 检查新路径是否安全
@@ -162,27 +156,11 @@ void UPathModifierComponent::CheckAndModifyPath()
             AStar->UpdateStoredPath(PathToCurrent);
             AStar->CreatePathSpline();
             CurrentPath = PathToCurrent;
-            ReplanCount = 0;  // 重置重规划计数
             UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 路径重规划并拼接完成，总点数: %d"), PathToCurrent.Num());
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 新路径不安全，尝试寻找替代路径"));
-            // 尝试寻找替代路径
-            FVector AlternativeGoal = GetNextValidGoal();
-            if (AlternativeGoal != CurrentPath[CurrentPosIndex])  // 确保不是当前点
-            {
-                TArray<FVector> AltPath;
-                if (AStar->FindPath(CurrentPath[CurrentPosIndex], AlternativeGoal, AltPath) && AltPath.Num() > 0)
-                {
-                    PathToCurrent = AltPath;
-                    AStar->UpdateStoredPath(PathToCurrent);
-                    AStar->CreatePathSpline();
-                    CurrentPath = PathToCurrent;
-                    ReplanCount = 0;  // 重置重规划计数
-                    UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 找到替代路径，总点数: %d"), PathToCurrent.Num());
-                }
-            }
+            UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 新路径不安全，保持原路径"));
         }
     }
     else

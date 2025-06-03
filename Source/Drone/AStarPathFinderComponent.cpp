@@ -40,247 +40,376 @@ const float MAX_SEARCH_TIME = 1.0f; // 1秒超时
 UAStarPathFinderComponent::UAStarPathFinderComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
+    Rounds = 0;
+    GridResolution = 0.0f;
 }
 
+void UAStarPathFinderComponent::InitGridMap(const FVector& MapSize, float InGridResolution)
+{
+    GridResolution = InGridResolution;
+    PoolSize = FIntVector(
+        FMath::CeilToInt(MapSize.X / GridResolution),
+        FMath::CeilToInt(MapSize.Y / GridResolution),
+        FMath::CeilToInt(MapSize.Z / GridResolution)
+    );
+    CenterIdx = PoolSize / 2;
+
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 初始化网格地图 - 分辨率: %.2f, 大小: (%d, %d, %d), 中心: (%d, %d, %d)"),
+        GridResolution, PoolSize.X, PoolSize.Y, PoolSize.Z, CenterIdx.X, CenterIdx.Y, CenterIdx.Z);
+
+    // 初始化三维网格地图
+    GridNodeMap.SetNum(PoolSize.X);
+    for (int32 i = 0; i < PoolSize.X; i++)
+    {
+        GridNodeMap[i].SetNum(PoolSize.Y);
+        for (int32 j = 0; j < PoolSize.Y; j++)
+        {
+            GridNodeMap[i][j].SetNum(PoolSize.Z);
+            for (int32 k = 0; k < PoolSize.Z; k++)
+            {
+                GridNodeMap[i][j][k] = new FGridNode();
+            }
+        }
+    }
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 网格地图初始化完成"));
+}
 
 bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Goal, TArray<FVector>& OutPath)
 {
+    // 尝试获取 GridMap 组件
     if (!GridMap)
     {
-        UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: GridMap is not set"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: Starting path finding from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)"),
-        Start.X, Start.Y, Start.Z, Goal.X, Goal.Y, Goal.Z);
-    
-    // Clear previous path
-    StoredPath.Empty();
-    OutPath.Empty();
-    
-    // 获取网格地图的边界信息
-    FVector MapOrigin = GridMap->GetMapOrigin();
-    FVector MapSize = GridMap->GetMapSize();
-    
-    UE_LOG(LogTemp, Warning, TEXT("Start World: (%.2f, %.2f, %.2f)"), Start.X, Start.Y, Start.Z);
-    UE_LOG(LogTemp, Warning, TEXT("Goal World: (%.2f, %.2f, %.2f)"), Goal.X, Goal.Y, Goal.Z);
-    UE_LOG(LogTemp, Warning, TEXT("MapOrigin: (%.2f, %.2f, %.2f), MapSize: (%.2f, %.2f, %.2f)"),
-        MapOrigin.X, MapOrigin.Y, MapOrigin.Z, MapSize.X, MapSize.Y, MapSize.Z);
-    
-    // Convert start and goal to grid coordinates
-    int StartX, StartY, StartZ;
-    int GoalX, GoalY, GoalZ;
-    
-    if (!GridMap->WorldToGrid(Start, StartX, StartY, StartZ))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: Start position is outside the grid"));
-        return false;
-    }
-    
-    if (!GridMap->WorldToGrid(Goal, GoalX, GoalY, GoalZ))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: Goal position is outside the grid"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Warning, TEXT("Start Grid: (%d, %d, %d)"), StartX, StartY, StartZ);
-    UE_LOG(LogTemp, Warning, TEXT("Goal Grid: (%d, %d, %d)"), GoalX, GoalY, GoalZ);
-    
-    // Check if start or goal is occupied
-    if (GridMap->IsOccupied(Start))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: Start position is occupied"));
-        return false;
-    }
-    
-    if (GridMap->IsOccupied(Goal))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: Goal position is occupied"));
-        return false;
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("FindPath called: Start=(%.2f, %.2f, %.2f), Goal=(%.2f, %.2f, %.2f)"),
-        Start.X, Start.Y, Start.Z, Goal.X, Goal.Y, Goal.Z);
-    UE_LOG(LogTemp, Log, TEXT("Grid coordinates: Start=(%d, %d, %d), Goal=(%d, %d, %d)"),
-        StartX, StartY, StartZ, GoalX, GoalY, GoalZ);
-    
-    // 使用优先队列替代TArray
-    TArray<FAStarNode*> OpenSet;
-    TArray<FAStarNode*> ClosedSet;
-    TMap<int32, FAStarNode*> NodeMap; // 用于快速查找节点
-    
-    // 创建起始节点
-    FAStarNode* StartNode = new FAStarNode(Start, StartX, StartY, StartZ);
-    StartNode->GScore = 0;
-    float InitialHScore = GetDiagonalHeuristic(StartX, StartY, StartZ, GoalX, GoalY, GoalZ);
-    StartNode->FScore = InitialHScore;
-    
-    UE_LOG(LogTemp, Warning, TEXT("Start node: GScore=%.2f, HScore=%.2f, FScore=%.2f"), 
-        StartNode->GScore, InitialHScore, StartNode->FScore);
-    
-    // 添加到开放集
-    OpenSet.Add(StartNode);
-    
-
-    int32 Steps = 0; 
-    // 主A*循环
-    while (OpenSet.Num() > 0)
-    {  
-        // 检查步数限制
-        if (++Steps > MAX_SEARCH_STEPS)
+        // 从同一 Actor 获取
+        GridMap = GetOwner()->FindComponentByClass<UGridMapComponent>();
+        
+        if (!GridMap)
         {
-            UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: Exceeded max steps %d"), MAX_SEARCH_STEPS);
-            // 清理内存
-            for (FAStarNode* Node : OpenSet) delete Node;
-            for (FAStarNode* Node : ClosedSet) delete Node;
+            UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 无法找到 GridMap 组件"));
             return false;
         }
-        
-        // 获取F值最小的节点
-        int32 BestIndex = 0;
-        float BestFScore = OpenSet[0]->FScore;
-        for (int32 i = 1; i < OpenSet.Num(); i++)
+        else
         {
-            if (OpenSet[i]->FScore < BestFScore)
+            UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 成功获取 GridMap 组件"));
+        }
+    }
+    
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 开始寻路 - 起点: (%.2f, %.2f, %.2f), 终点: (%.2f, %.2f, %.2f)"),
+        Start.X, Start.Y, Start.Z, Goal.X, Goal.Y, Goal.Z);
+
+    // 初始化网格地图
+    InitGridMap(GridMap->GetMapSize(), GridMap->GetResolution());
+
+    // 执行A*搜索
+    EAStarResult Result = Search(Start, Goal);
+    if (Result != EAStarResult::SUCCESS)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: 路径搜索失败 - 错误代码: %d"), static_cast<int32>(Result));
+        return false;
+    }
+    
+    // 转换路径格式
+    OutPath.Empty();
+    for (FGridNode* Node : GridPath)
+    {
+        OutPath.Add(Index2Coord(Node->Index));
+    }
+    Algo::Reverse(OutPath);
+
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 找到路径 - 路径点数: %d"), OutPath.Num());
+
+    // // 对路径进行平滑处理
+    // ChaikinSmoothPath(OutPath, 2);
+    // UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 路径平滑完成"));
+
+    // 更新存储的路径
+    StoredPath = OutPath;
+
+    // 更新 PathModifier 组件的路径
+    if (AActor* Owner = GetOwner())
+    {
+        if (UPathModifierComponent* PathModifier = Owner->FindComponentByClass<UPathModifierComponent>())
+        {
+            PathModifier->SetPath(OutPath);
+            UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: 已更新 PathModifier 的路径"));
+        }
+    }
+
+    // 清理内存
+    for (int32 i = 0; i < PoolSize.X; i++)
+    {
+        for (int32 j = 0; j < PoolSize.Y; j++)
+        {
+            for (int32 k = 0; k < PoolSize.Z; k++)
             {
-                BestFScore = OpenSet[i]->FScore;
-                BestIndex = i;
+                delete GridNodeMap[i][j][k];
             }
         }
-        
-        FAStarNode* Current = OpenSet[BestIndex];
-        OpenSet.RemoveAt(BestIndex);
-        
-        // 检查是否到达目标
-        const float GoalTolerance = 1.0f; // 允许1个网格单位的误差
-        float DistanceToGoal = FVector::Dist(
-            FVector(Current->GridX, Current->GridY, Current->GridZ),
-            FVector(GoalX, GoalY, GoalZ)
-        );
-        
-        if (DistanceToGoal <= GoalTolerance)
+    }
+
+    return true;
+}
+
+EAStarResult UAStarPathFinderComponent::Search(const FVector& StartPt, const FVector& EndPt)
+{
+    Rounds++;
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 开始第 %d 轮搜索"), Rounds);
+
+    FIntVector StartIdx, EndIdx;
+    if (!ConvertToIndexAndAdjustStartEndPoints(StartPt, EndPt, StartIdx, EndIdx))
+    {
+        UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 起点或终点转换失败"));
+        return EAStarResult::INIT_ERR;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 起点索引: (%d, %d, %d), 终点索引: (%d, %d, %d)"),
+        StartIdx.X, StartIdx.Y, StartIdx.Z, EndIdx.X, EndIdx.Y, EndIdx.Z);
+
+    // 初始化起点和终点
+    FGridNode* StartPtr = GridNodeMap[StartIdx.X][StartIdx.Y][StartIdx.Z];
+    FGridNode* EndPtr = GridNodeMap[EndIdx.X][EndIdx.Y][EndIdx.Z];
+
+    // 清空开放列表
+    OpenSet.Empty();
+    GridPath.Empty();
+
+    // 设置起点参数
+    StartPtr->Index = StartIdx;
+    StartPtr->Rounds = Rounds;
+    StartPtr->GScore = 0.0f;
+    StartPtr->FScore = GetHeu(StartPtr, EndPtr);
+    StartPtr->State = ENodeState::OPENSET;
+    StartPtr->CameFrom = nullptr;
+    OpenSet.Add(StartPtr);
+
+    int32 SearchSteps = 0;
+    // A*主循环
+    while (OpenSet.Num() > 0)
+    {
+        SearchSteps++;
+        if (SearchSteps % 1000 == 0)
         {
-            // 如果非常接近目标，直接使用目标点作为终点
-            if (DistanceToGoal > 0.0f)
+            // UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 搜索步数: %d, 开放列表大小: %d"), SearchSteps, OpenSet.Num());
+        }
+
+        // 获取F值最小的节点
+        FGridNode* Current = OpenSet[0];
+        OpenSet.RemoveAt(0);
+
+        // 检查是否到达终点
+        if (Current->Index == EndPtr->Index)
+        {
+            GridPath = RetrievePath(Current);
+            UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 找到路径 - 总步数: %d"), SearchSteps);
+            return EAStarResult::SUCCESS;
+        }
+
+        Current->State = ENodeState::CLOSEDSET;
+
+        // 遍历相邻节点
+        for (int32 dx = -1; dx <= 1; dx++)
+        {
+            for (int32 dy = -1; dy <= 1; dy++)
             {
-                FVector GoalWorldPos = GridMap->GridToWorld(GoalX, GoalY, GoalZ);
-                Current->Position = GoalWorldPos;
-                Current->GridX = GoalX;
-                Current->GridY = GoalY;
-                Current->GridZ = GoalZ;
-            }
-            
-            // 重建路径
-            ReconstructPath(Current, OutPath);
-            
-            // 对路径进行平滑处理
-            ChaikinSmoothPath(OutPath, 2); // 2次迭代
-            
-            // 清理内存
-            for (FAStarNode* Node : OpenSet) delete Node;
-            for (FAStarNode* Node : ClosedSet) delete Node;
-            
-            StoredPath = OutPath;
-            UE_LOG(LogTemp, Log, TEXT("FindPath: Found safe path with %d points in %d steps, final distance to goal: %.2f"), 
-                OutPath.Num(), Steps, DistanceToGoal);
-            
-            // 在成功找到路径后自动同步到PathModifierComponent
-            if (OutPath.Num() > 0)
-            {
-                AActor* Owner = GetOwner();
-                if (Owner)
+                for (int32 dz = -1; dz <= 1; dz++)
                 {
-                    UPathModifierComponent* PathMod = Owner->FindComponentByClass<UPathModifierComponent>();
-                    if (PathMod)
+                    if (dx == 0 && dy == 0 && dz == 0)
+                        continue;
+
+                    FIntVector NeighborIdx = Current->Index + FIntVector(dx, dy, dz);
+
+                    // 检查边界
+                    if (NeighborIdx.X < 1 || NeighborIdx.X >= PoolSize.X - 1 ||
+                        NeighborIdx.Y < 1 || NeighborIdx.Y >= PoolSize.Y - 1 ||
+                        NeighborIdx.Z < 1 || NeighborIdx.Z >= PoolSize.Z - 1)
                     {
-                        PathMod->SetPath(OutPath);
-                        UE_LOG(LogTemp, Warning, TEXT("[AStar] 已自动同步路径到PathModifierComponent"));
+                        continue;
+                    }
+
+                    FGridNode* NeighborPtr = GridNodeMap[NeighborIdx.X][NeighborIdx.Y][NeighborIdx.Z];
+                    NeighborPtr->Index = NeighborIdx;
+
+                    // 检查节点状态
+                    bool bExplored = NeighborPtr->Rounds == Rounds;
+                    if (bExplored && NeighborPtr->State == ENodeState::CLOSEDSET)
+                        continue;
+
+                    NeighborPtr->Rounds = Rounds;
+
+                    // 检查是否是障碍物
+                    if (GridMap && GridMap->IsOccupied(Index2Coord(NeighborPtr->Index)))
+                    {
+                        // UE_LOG(LogTemp,Warning,TEXT("(%.2f,%.2f,%.2f)"),Index2Coord(NeighborPtr->Index).X,Index2Coord(NeighborPtr->Index).Y,Index2Coord(NeighborPtr->Index).Z);
+                        continue;
+                    }
+
+                    // 计算代价
+                    float StaticCost = FVector(dx, dy, dz).Size();
+                    float TentativeGScore = Current->GScore + StaticCost;
+
+                    if (!bExplored)
+                    {
+                        NeighborPtr->State = ENodeState::OPENSET;
+                        NeighborPtr->CameFrom = Current;
+                        NeighborPtr->GScore = TentativeGScore;
+                        NeighborPtr->FScore = TentativeGScore + GetEuclHeu(NeighborPtr, EndPtr);
+                        OpenSet.Add(NeighborPtr);
+                    }
+                    else if (TentativeGScore < NeighborPtr->GScore)
+                    {
+                        NeighborPtr->CameFrom = Current;
+                        NeighborPtr->GScore = TentativeGScore;
+                        NeighborPtr->FScore = TentativeGScore + GetEuclHeu(NeighborPtr, EndPtr);
                     }
                 }
             }
-            return true;
-        }
-        
-        // 添加到关闭集
-        ClosedSet.Add(Current);
-        
-        // 获取邻居节点
-        TArray<FAStarNode*> Neighbors;
-        GetNeighborsOptimized(Current, Neighbors, GoalX, GoalY, GoalZ);
-        
-        // 处理邻居节点
-        for (FAStarNode* Neighbor : Neighbors)
-        {
-            // 计算从当前节点到相邻节点的代价
-            float StaticCost = FMath::Sqrt(static_cast<float>(
-                FMath::Square(Neighbor->GridX - Current->GridX) +
-                FMath::Square(Neighbor->GridY - Current->GridY) +
-                FMath::Square(Neighbor->GridZ - Current->GridZ)
-            ));
-            float TentativeGScore = Current->GScore + StaticCost * GridMap->GetResolution();
-            
-            // 检查是否在关闭集中
-            bool InClosedSet = false;
-            for (FAStarNode* ClosedNode : ClosedSet)
-            {
-                if (*Neighbor == *ClosedNode)
-                {
-                    InClosedSet = true;
-                    break;
-                }
-            }
-            
-            if (InClosedSet)
-            {
-                delete Neighbor;
-                continue;
-            }
-            
-            // 检查是否在开放集中
-            bool InOpenSet = false;
-            FAStarNode* OpenNode = nullptr;
-            for (FAStarNode* Node : OpenSet)
-            {
-                if (*Node == *Neighbor)
-                {
-                    InOpenSet = true;
-                    OpenNode = Node;
-                    break;
-                }
-            }
-            
-            if (!InOpenSet)
-            {
-                // 新节点
-                Neighbor->GScore = TentativeGScore;
-                float NeighborHScore = GetDiagonalHeuristic(Neighbor->GridX, Neighbor->GridY, Neighbor->GridZ, GoalX, GoalY, GoalZ);
-                Neighbor->FScore = TentativeGScore + NeighborHScore;
-                Neighbor->Parent = Current;
-                OpenSet.Add(Neighbor);
-            }
-            else if (TentativeGScore < OpenNode->GScore)
-            {
-                // 更新现有节点
-                OpenNode->GScore = TentativeGScore;
-                float OpenNodeHScore = GetDiagonalHeuristic(OpenNode->GridX, OpenNode->GridY, OpenNode->GridZ, GoalX, GoalY, GoalZ);
-                OpenNode->FScore = TentativeGScore + OpenNodeHScore;
-                OpenNode->Parent = Current;
-                delete Neighbor;
-            }
-            else
-            {
-                delete Neighbor;
-            }
         }
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: 搜索失败 - 未找到路径, 总步数: %d"), SearchSteps);
+    return EAStarResult::SEARCH_ERR;
+}
+
+bool UAStarPathFinderComponent::ConvertToIndexAndAdjustStartEndPoints(const FVector& StartPt, const FVector& EndPt, FIntVector& StartIdx, FIntVector& EndIdx)
+{
+    FVector Start = StartPt;
+    FVector End = EndPt;
+    if (!Coord2Index(Start, StartIdx) || !Coord2Index(End, EndIdx))
+    {
+        UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 坐标转换失败 - 起点: (%.2f, %.2f, %.2f), 终点: (%.2f, %.2f, %.2f)"),
+            Start.X, Start.Y, Start.Z, End.X, End.Y, End.Z);
+        return false;
+    }
+
+    // 检查起点是否在障碍物内
+    if (CheckOccupancy(Index2Coord(StartIdx)))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: 起点在障碍物内，尝试调整"));
+        FVector Direction = (End - Start).GetSafeNormal();
+        Start += Direction * GridResolution;
+        if (!Coord2Index(Start, StartIdx))
+        {
+            UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 起点调整失败"));
+            return false;
+        }
+        UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 起点已调整到: (%.2f, %.2f, %.2f)"), Start.X, Start.Y, Start.Z);
+    }
+
+    // 检查终点是否在障碍物内
+    if (CheckOccupancy(Index2Coord(EndIdx)))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: 终点在障碍物内，尝试调整"));
+        FVector Direction = (Start - End).GetSafeNormal();
+        End += Direction * GridResolution;
+        if (!Coord2Index(End, EndIdx))
+        {
+            UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 终点调整失败"));
+            return false;
+        }
+        UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 终点已调整到: (%.2f, %.2f, %.2f)"), End.X, End.Y, End.Z);
+    }
+
+    return true;
+}
+
+bool UAStarPathFinderComponent::Coord2Index(const FVector& Coord, FIntVector& Index) const
+{
+    Index.X = FMath::RoundToInt(Coord.X / GridResolution) + CenterIdx.X;
+    Index.Y = FMath::RoundToInt(Coord.Y / GridResolution) + CenterIdx.Y;
+    Index.Z = FMath::RoundToInt(Coord.Z / GridResolution) + CenterIdx.Z;
     
-    // 如果当前尝试失败，清理内存并准备下一次尝试
-    for (FAStarNode* Node : OpenSet) delete Node;
-    for (FAStarNode* Node : ClosedSet) delete Node;
-    OpenSet.Empty();
-    ClosedSet.Empty();
+    bool bIsValid = (Index.X >= 0 && Index.X < PoolSize.X &&
+                     Index.Y >= 0 && Index.Y < PoolSize.Y &&
+                     Index.Z >= 0 && Index.Z < PoolSize.Z);
+                     
+    if (!bIsValid)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: 坐标超出范围 - 坐标: (%.2f, %.2f, %.2f), 索引: (%d, %d, %d), 范围: (%d, %d, %d)"),
+            Coord.X, Coord.Y, Coord.Z, Index.X, Index.Y, Index.Z, PoolSize.X, PoolSize.Y, PoolSize.Z);
+    }
     
-    return false;
+    return bIsValid;
+}
+
+FVector UAStarPathFinderComponent::Index2Coord(const FIntVector& Index) const
+{
+    return FVector(
+        (Index.X - CenterIdx.X) * GridResolution,
+        (Index.Y - CenterIdx.Y) * GridResolution,
+        (Index.Z - CenterIdx.Z) * GridResolution
+    );
+}
+
+float UAStarPathFinderComponent::GetHeu(const FGridNode* Node1, const FGridNode* Node2) const
+{
+    if (!Node1 || !Node2) return FLT_MAX;
+    
+    // 使用欧几里得距离作为启发式函数
+    return GetEuclHeu(Node1, Node2);
+}
+
+float UAStarPathFinderComponent::GetDiagHeu(const FGridNode* Node1, const FGridNode* Node2) const
+{
+    if (!Node1 || !Node2) return FLT_MAX;
+    
+    float dx = static_cast<float>(FMath::Abs(Node1->Index.X - Node2->Index.X));
+    float dy = static_cast<float>(FMath::Abs(Node1->Index.Y - Node2->Index.Y));
+    float dz = static_cast<float>(FMath::Abs(Node1->Index.Z - Node2->Index.Z));
+    
+    float min = FMath::Min3(dx, dy, dz);
+    float max = FMath::Max3(dx, dy, dz);
+    float mid = dx + dy + dz - min - max;
+    
+    // 修复 Sqrt 调用的类型转换问题
+    const float sqrt3 = FMath::Sqrt(3.0f);
+    const float sqrt2 = FMath::Sqrt(2.0f);
+    return (sqrt3 - sqrt2) * min + (sqrt2 - 1.0f) * mid + max;
+}
+
+float UAStarPathFinderComponent::GetManhHeu(const FGridNode* Node1, const FGridNode* Node2) const
+{
+    if (!Node1 || !Node2) return FLT_MAX;
+    
+    return static_cast<float>(FMath::Abs(Node1->Index.X - Node2->Index.X) +
+           FMath::Abs(Node1->Index.Y - Node2->Index.Y) +
+           FMath::Abs(Node1->Index.Z - Node2->Index.Z));
+}
+
+float UAStarPathFinderComponent::GetEuclHeu(const FGridNode* Node1, const FGridNode* Node2) const
+{
+    if (!Node1 || !Node2) return FLT_MAX;
+    
+    float dx = static_cast<float>(Node1->Index.X - Node2->Index.X);
+    float dy = static_cast<float>(Node1->Index.Y - Node2->Index.Y);
+    float dz = static_cast<float>(Node1->Index.Z - Node2->Index.Z);
+    
+    // 使用 FVector 的 Size 函数来计算欧几里得距离
+    return FVector(dx, dy, dz).Size();
+}
+
+TArray<FGridNode*> UAStarPathFinderComponent::RetrievePath(FGridNode* Current)
+{
+    TArray<FGridNode*> Path;
+    while (Current)
+    {
+        Path.Add(Current);
+        Current = Current->CameFrom;
+    }
+    return Path;
+}
+
+bool UAStarPathFinderComponent::CheckOccupancy(const FVector& Position) const
+{
+    // if (!GridMap)
+    // {
+    //     UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: GridMap未设置，无法检查占用"));
+    //     return true;
+    // }
+    bool bIsOccupied = GridMap->IsOccupied(Position);
+    // if (bIsOccupied)
+    // {
+    //     UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 位置被占用 - (%.2f, %.2f, %.2f)"), Position.X, Position.Y, Position.Z);
+    // }
+    return bIsOccupied;
 }
 
 void UAStarPathFinderComponent::VisualizePath(float Duration)
@@ -320,423 +449,61 @@ void UAStarPathFinderComponent::VisualizePath(float Duration)
     UE_LOG(LogTemp, Log, TEXT("VisualizePath: Visualization completed"));
 }
 
-float UAStarPathFinderComponent::Distance(FAStarNode* A, FAStarNode* B)
-{
-    // Euclidean distance
-    return FVector::Dist(A->Position, B->Position);
-}
-
-// 优化后的邻居节点生成函数
-void UAStarPathFinderComponent::GetNeighborsOptimized(FAStarNode* Node, TArray<FAStarNode*>& OutNeighbors, int32 GoalX, int32 GoalY, int32 GoalZ)
-{
-    if (!GridMap)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GetNeighborsOptimized: GridMap is not set"));
-        return;
-    }
-    
-    // 26个方向：包括对角线移动
-    const int32 Directions[26][3] = {
-        // 6个主要方向
-        {1,0,0}, {-1,0,0},  // 前后
-        {0,1,0}, {0,-1,0},  // 左右
-        {0,0,1}, {0,0,-1},  // 上下
-        // 12个边线方向
-        {1,1,0}, {1,-1,0}, {-1,1,0}, {-1,-1,0},  // XY平面
-        {1,0,1}, {1,0,-1}, {-1,0,1}, {-1,0,-1},  // XZ平面
-        {0,1,1}, {0,1,-1}, {0,-1,1}, {0,-1,-1},  // YZ平面
-        // 8个对角线方向
-        {1,1,1}, {1,1,-1}, {1,-1,1}, {1,-1,-1},
-        {-1,1,1}, {-1,1,-1}, {-1,-1,1}, {-1,-1,-1}
-    };
-
-    int32 CurrentX = Node->GridX;
-    int32 CurrentY = Node->GridY;
-    int32 CurrentZ = Node->GridZ;
-
-    int32 DirX = FMath::Sign(GoalX - CurrentX);
-    int32 DirY = FMath::Sign(GoalY - CurrentY);
-    int32 DirZ = FMath::Sign(GoalZ - CurrentZ);
-
-    TArray<int32> DirectionOrder;
-    if (DirX != 0 && DirY != 0 && DirZ != 0)
-    {
-        for (int32 i = 18; i < 26; i++)
-        {
-            if (Directions[i][0] == DirX && 
-                Directions[i][1] == DirY && 
-                Directions[i][2] == DirZ)
-            {
-                DirectionOrder.Add(i);
-                break;
-            }
-        }
-    }
-    if (DirX != 0 && DirY != 0)
-    {
-        for (int32 i = 6; i < 10; i++)
-        {
-            if (Directions[i][0] == DirX && Directions[i][1] == DirY)
-            {
-                DirectionOrder.Add(i);
-                break;
-            }
-        }
-    }
-    if (DirX != 0 && DirZ != 0)
-    {
-        for (int32 i = 10; i < 14; i++)
-        {
-            if (Directions[i][0] == DirX && Directions[i][2] == DirZ)
-            {
-                DirectionOrder.Add(i);
-                break;
-            }
-        }
-    }
-    if (DirY != 0 && DirZ != 0)
-    {
-        for (int32 i = 14; i < 18; i++)
-        {
-            if (Directions[i][1] == DirY && Directions[i][2] == DirZ)
-            {
-                DirectionOrder.Add(i);
-                break;
-            }
-        }
-    }
-    if (DirX != 0) DirectionOrder.Add(DirX > 0 ? 0 : 1);
-    if (DirY != 0) DirectionOrder.Add(DirY > 0 ? 2 : 3);
-    if (DirZ != 0) DirectionOrder.Add(DirZ > 0 ? 4 : 5);
-    for (int32 i = 0; i < 26; i++)
-    {
-        if (!DirectionOrder.Contains(i))
-        {
-            DirectionOrder.Add(i);
-        }
-    }
-
-    // 每个方向优先尝试5格，5格不可行时才尝试1格
-    for (int32 i = 0; i < DirectionOrder.Num(); i++)
-    {
-        int32 DirectionIndex = DirectionOrder[i];
-        bool bFoundValid = false;
-        for (int StepIdx = 0; StepIdx < 2; ++StepIdx)
-        {
-            int32 StepSize = (StepIdx == 0) ? 5 : 1;
-            int32 NX = CurrentX + Directions[DirectionIndex][0] * StepSize;
-            int32 NY = CurrentY + Directions[DirectionIndex][1] * StepSize;
-            int32 NZ = CurrentZ + Directions[DirectionIndex][2] * StepSize;
-            
-            if (NX < 0 || NX >= GridMap->GetGridDimX() ||
-                NY < 0 || NY >= GridMap->GetGridDimY() ||
-                NZ < 0 || NZ >= GridMap->GetGridDimZ())
-            {
-                continue;
-            }
-            
-            FVector WorldPos = GridMap->GridToWorld(NX, NY, NZ);
-            
-            // 直接检查点是否被占用
-            if (GridMap->IsOccupied(WorldPos))
-            {
-                continue;
-            }
-            
-            // 如果点安全，创建新节点
-            FAStarNode* Neighbor = new FAStarNode(WorldPos, NX, NY, NZ);
-            OutNeighbors.Add(Neighbor);
-            bFoundValid = true;
-            break;
-        }
-    }
-}
-
-void UAStarPathFinderComponent::ReconstructPath(FAStarNode* GoalNode, TArray<FVector>& OutPath)
-{
-    // Clear path
-    OutPath.Empty();
-    
-    // Trace back from goal to start
-    FAStarNode* Current = GoalNode;
-    while (Current)
-    {
-        OutPath.Insert(Current->Position, 0);
-        Current = Current->Parent;
-    }
-}
-
-void UAStarPathFinderComponent::BeginPlay()
-{
-    Super::BeginPlay();
-    
-    // 自动查找GridMap组件
-    if (!GridMap)
-    {
-        AActor* Owner = GetOwner();
-        if (Owner)
-        {
-            GridMap = Owner->FindComponentByClass<UGridMapComponent>();
-            if (!GridMap)
-            {
-                UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: No GridMap component found on owner actor"));
-            }
-            else
-            {
-                UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: Successfully found GridMap component"));
-            }
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: No valid owner actor"));
-        }
-    }
-    
-    // 检查组件是否有效
-    if (!IsValid(this))
-    {
-        UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: Component is not valid"));
-    }
-}
-
-void UAStarPathFinderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-}
-
-USplineComponent* UAStarPathFinderComponent::CreatePathSpline()
-{
-    if (!GetWorld())
-    {
-        UE_LOG(LogTemp, Error, TEXT("CreatePathSpline: No valid world found!"));
-        return nullptr;
-    }
-    
-    if (!IsValid(this))
-    {
-        UE_LOG(LogTemp, Error, TEXT("CreatePathSpline: Component is not valid"));
-        return nullptr;
-    }
-    
-    // UE_LOG(LogTemp, Log, TEXT("CreatePathSpline: Starting with %d path points"), StoredPath.Num());
-    
-    // 检查路径点数量
-    if (StoredPath.Num() < 2)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("CreatePathSpline: Not enough path points to create a valid spline (need at least 2 points)"));
-        return nullptr;
-    }
-    
-    // 如果已存在Spline组件，先移除
-    if (PathSpline)
-    {
-        UE_LOG(LogTemp, Log, TEXT("CreatePathSpline: Removing existing spline component"));
-        PathSpline->DestroyComponent();
-        PathSpline = nullptr;
-    }
-    
-    // 创建新的Spline组件
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CreatePathSpline: No valid owner actor!"));
-        return nullptr;
-    }
-    
-    PathSpline = NewObject<USplineComponent>(Owner, TEXT("PathSpline"));
-    if (!PathSpline)
-    {
-        UE_LOG(LogTemp, Error, TEXT("CreatePathSpline: Failed to create spline component!"));
-        return nullptr;
-    }
-    
-    // 注册组件
-    PathSpline->RegisterComponent();
-    Owner->AddInstanceComponent(PathSpline);
-    
-    // 确保组件被正确添加
-    if (!Owner->GetComponents().Contains(PathSpline))
-    {
-        UE_LOG(LogTemp, Error, TEXT("CreatePathSpline: Failed to add spline component to owner"));
-        return nullptr;
-    }
-    
-    // 清空现有的点
-    PathSpline->ClearSplinePoints();
-    
-    // 添加路径点
-    for (int32 i = 0; i < StoredPath.Num(); i++)
-    {
-        PathSpline->AddSplinePoint(StoredPath[i], ESplineCoordinateSpace::World);
-    }
-    
-    // 设置曲线类型和平滑度
-    for (int32 i = 0; i < StoredPath.Num(); i++)
-    {
-        // 使用曲线类型使路径更平滑
-        PathSpline->SetSplinePointType(i, ESplinePointType::Curve);
-        
-        // 设置到达和离开的切线
-        if (i > 0 && i < StoredPath.Num() - 1)
-        {
-            FVector PrevPoint = StoredPath[i - 1];
-            FVector CurrentPoint = StoredPath[i];
-            FVector NextPoint = StoredPath[i + 1];
-            
-            // 计算平滑的切线
-            FVector ArriveTangent = (CurrentPoint - PrevPoint).GetSafeNormal() * PathSmoothingFactor;
-            FVector LeaveTangent = (NextPoint - CurrentPoint).GetSafeNormal() * PathSmoothingFactor;
-            
-            PathSpline->SetTangentsAtSplinePoint(i, ArriveTangent, LeaveTangent, ESplineCoordinateSpace::World);
-        }
-    }
-    
-    // 更新样条曲线
-    PathSpline->UpdateSpline();
-    
-    // 设置更明显的材质
-    if (UMaterialInterface* SplineMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial")))
-    {
-        // UE_LOG(LogTemp, Log, TEXT("CreatePathSpline: Setting material"));
-        PathSpline->SetMaterial(0, SplineMaterial);
-    }
-  
-    // 存储样条曲线数据
-    StoreSplineData();
-    return PathSpline;
-}
-
-// 添加新的函数来存储样条曲线数据
-void UAStarPathFinderComponent::StoreSplineData()
-{
-    if (!PathSpline)
-    {
-        return;
-    }
-    
-    // 存储样条曲线点
-    StoredSplinePoints.Empty();
-    for (int32 i = 0; i < PathSpline->GetNumberOfSplinePoints(); i++)
-    {
-        StoredSplinePoints.Add(PathSpline->GetLocationAtSplinePoint(i, ESplineCoordinateSpace::World));
-    }
-    
-    // 存储样条曲线长度
-    StoredSplineLength = PathSpline->GetSplineLength();
-}
-
-
-void UAStarPathFinderComponent::SmoothPath(TArray<FVector>& Path)
-{
-    if (Path.Num() < 3)
-        return;
-        
-    TArray<FVector> SmoothedPath = Path;
-    
-    for (int i = 1; i < Path.Num() - 1; i++)
-    {
-        FVector Prev = Path[i - 1];
-        FVector Current = Path[i];
-        FVector Next = Path[i + 1];
-        
-        // 使用加权平均进行平滑
-        SmoothedPath[i] = Current * (1.0f - PathSmoothingFactor) + 
-                         (Prev + Next) * 0.5f * PathSmoothingFactor;
-    }
-    
-    Path = SmoothedPath;
-}
-
-// 添加新的启发式函数
-float UAStarPathFinderComponent::GetDiagonalHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2)
-{
-    if (!GridMap)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GetDiagonalHeuristic: GridMap is not set"));
-        return 0.0f;
-    }
-    
-    float DX = FMath::Abs(X2 - X1);
-    float DY = FMath::Abs(Y2 - Y1);
-    float DZ = FMath::Abs(Z2 - Z1);
-    
-    float H = 0.0f;
-    float Diag = FMath::Min3(DX, DY, DZ);
-    DX -= Diag;
-    DY -= Diag;
-    DZ -= Diag;
-    
-    if (DX == 0)
-    {
-        H = 1.0f * FMath::Sqrt(3.0f) * Diag + FMath::Sqrt(2.0f) * FMath::Min(DY, DZ) + 1.0f * FMath::Abs(DY - DZ);
-    }
-    else if (DY == 0)
-    {
-        H = 1.0f * FMath::Sqrt(3.0f) * Diag + FMath::Sqrt(2.0f) * FMath::Min(DX, DZ) + 1.0f * FMath::Abs(DX - DZ);
-    }
-    else if (DZ == 0)
-    {
-        H = 1.0f * FMath::Sqrt(3.0f) * Diag + FMath::Sqrt(2.0f) * FMath::Min(DX, DY) + 1.0f * FMath::Abs(DX - DY);
-    }
-    
-    return H * GridMap->GetResolution();
-}
-
-float UAStarPathFinderComponent::GetManhattanHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2)
-{
-    if (!GridMap)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GetManhattanHeuristic: GridMap is not set"));
-        return 0.0f;
-    }
-    
-    float DX = FMath::Abs(X2 - X1);
-    float DY = FMath::Abs(Y2 - Y1);
-    float DZ = FMath::Abs(Z2 - Z1);
-    return (DX + DY + DZ) * GridMap->GetResolution();
-}
-
-float UAStarPathFinderComponent::GetEuclideanHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2)
-{
-    if (!GridMap)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GetEuclideanHeuristic: GridMap is not set"));
-        return 0.0f;
-    }
-    
-    float DX = X2 - X1;
-    float DY = Y2 - Y1;
-    float DZ = Z2 - Z1;
-    return FMath::Sqrt(DX*DX + DY*DY + DZ*DZ) * GridMap->GetResolution();
-}
-
-
-bool UAStarPathFinderComponent::IsPathPointSafe(const FVector& Point) const
-{
-    if (!GridMap)
-    {
-        return false;
-    }
-    // 直接检查点是否被占用
-    return !GridMap->IsOccupied(Point);
-}
-
 // Chaikin曲线细分平滑算法
 void UAStarPathFinderComponent::ChaikinSmoothPath(TArray<FVector>& Path, int Iterations)
 {
-    for (int iter = 0; iter < Iterations; ++iter)
+    if (Path.Num() < 2) return;
+    
+    // 在平滑之前，先移除太近的点
+    TArray<FVector> FilteredPath;
+    FilteredPath.Add(Path[0]);
+    
+    const float MinDistance = 10.0f; // 最小距离阈值
+    for (int32 i = 1; i < Path.Num(); ++i)
     {
-        if (Path.Num() < 3) return;
-        TArray<FVector> NewPath;
-        NewPath.Add(Path[0]); // 保留起点
-        for (int i = 0; i < Path.Num() - 1; ++i)
+        float Distance = FVector::Distance(FilteredPath.Last(), Path[i]);
+        if (Distance >= MinDistance)
         {
-            FVector Q = Path[i] * 0.75f + Path[i + 1] * 0.25f;
-            FVector R = Path[i] * 0.25f + Path[i + 1] * 0.75f;
+            FilteredPath.Add(Path[i]);
+        }
+    }
+    
+    Path = FilteredPath;
+    
+    // 执行 Chaikin 平滑
+    for (int32 i = 0; i < Iterations; ++i)
+    {
+        TArray<FVector> NewPath;
+        NewPath.Add(Path[0]); // 保持起点不变
+        
+        for (int32 j = 0; j < Path.Num() - 1; ++j)
+        {
+            FVector P0 = Path[j];
+            FVector P1 = Path[j + 1];
+            
+            // 计算新的控制点
+            FVector Q = P0 + (P1 - P0) * PathSmoothingFactor;
+            FVector R = P1 + (P0 - P1) * PathSmoothingFactor;
+            
+            // 检查新点是否会导致方向突变
+            if (j > 0)
+            {
+                FVector PrevDir = (P0 - Path[j-1]).GetSafeNormal();
+                FVector NewDir = (Q - P0).GetSafeNormal();
+                float DotProduct = FVector::DotProduct(PrevDir, NewDir);
+                
+                // 如果方向变化太大，调整新点的位置
+                if (DotProduct < 0.7f) // 约45度
+                {
+                    Q = P0 + (P1 - P0) * (PathSmoothingFactor * 0.5f);
+                }
+            }
+            
             NewPath.Add(Q);
             NewPath.Add(R);
         }
-        NewPath.Add(Path.Last()); // 保留终点
+        
+        NewPath.Add(Path.Last()); // 保持终点不变
         Path = NewPath;
     }
 }
@@ -772,4 +539,65 @@ void UAStarPathFinderComponent::SetPath(const TArray<FVector>& InPath)
     // }
     // 自动调用UpdateStoredPath以更新存储的路径并重新可视化
     UpdateStoredPath(CurrentPath);
+}
+
+TArray<FVector> UAStarPathFinderComponent::GetSearchedPath()
+{
+    return SearchedPath;
+}
+
+void UAStarPathFinderComponent::BeginPlay()
+{
+    Super::BeginPlay();
+    
+    // 初始化组件
+    if (!GridMap)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AStarPathFinder: GridMap组件未设置"));
+    }
+}
+
+void UAStarPathFinderComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    // 如果需要，可以在这里添加每帧更新的逻辑
+}
+
+USplineComponent* UAStarPathFinderComponent::CreatePathSpline()
+{
+    if (!GetOwner())
+    {
+        UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 无法创建路径样条线 - 没有有效的所有者"));
+        return nullptr;
+    }
+
+    // 如果已经存在样条线组件，先销毁它
+    if (PathSpline)
+    {
+        PathSpline->DestroyComponent();
+        PathSpline = nullptr;
+    }
+
+    // 创建新的样条线组件
+    PathSpline = NewObject<USplineComponent>(GetOwner(), TEXT("PathSpline"));
+    if (PathSpline)
+    {
+        PathSpline->RegisterComponent();
+        PathSpline->SetMobility(EComponentMobility::Movable);
+        PathSpline->SetWorldLocation(GetOwner()->GetActorLocation());
+        
+        // 设置样条线属性
+        PathSpline->SetSplinePoints(StoredPath, ESplineCoordinateSpace::World);
+        PathSpline->SetSplinePointType(0, ESplinePointType::Linear);
+        PathSpline->SetSplinePointType(StoredPath.Num() - 1, ESplinePointType::Linear);
+        
+        UE_LOG(LogTemp, Log, TEXT("AStarPathFinder: 成功创建路径样条线"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("AStarPathFinder: 创建路径样条线失败"));
+    }
+
+    return PathSpline;
 }

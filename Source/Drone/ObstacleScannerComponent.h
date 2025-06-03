@@ -66,9 +66,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ObstacleScanner")
     float ObstacleUpdateTolerance = 10.0f; // 障碍物更新容差范围
 
-    // 绘制所有障碍物
-    void DrawAllObstacles();
-
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -81,6 +78,11 @@ private:
     // 上次扫描后经过的时间
     float TimeSinceLastScan = 0.0f;
 
+    // 存储连续的扫描点
+    TArray<FVector> ContinuousScanPoints;
+    bool bIsContinuousScanning = false;
+    float LastScanTime = 0.0f;
+    float ContinuousScanTimeout = 0.2f; // 连续扫描超时时间
 
     // 执行射线检测
     void PerformRaycast(const FVector& Start, const FVector& End);
@@ -88,7 +90,8 @@ private:
     // 更新网格地图
     void UpdateGridMap(const FVector& HitLocation, bool bIsObstacle);
 
-
+    // 处理连续的扫描点
+    void ProcessContinuousScanPoints();
 
     // 可视化扫描结果
     void VisualizeScanResults(const FVector& Center, float Radius, float Height);

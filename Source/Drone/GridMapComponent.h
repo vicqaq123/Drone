@@ -31,10 +31,7 @@ public:
     // Initialize the grid map
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
     void InitializeMap(FVector Origin, FVector Size, float Resolution);
-    
-    // Update obstacles from scene
-    UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
-    void UpdateObstaclesFromScene(float DetectionRadius);
+
     
     // 添加批量添加圆柱形障碍物的函数声明
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
@@ -69,7 +66,7 @@ public:
     bool WorldToGrid(const FVector& WorldPos, int32& GridX, int32& GridY, int32& GridZ);
     
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
-    FVector GridToWorld(int32 GridX, int32 GridY, int32 GridZ) const;
+    FVector GridToWorld(int32 GridX, int32 GridY, int32 GridZ);
     
     // Get resolution
     UFUNCTION(BlueprintPure, Category="PathPlanning|GridMap")
@@ -106,9 +103,6 @@ public:
     UFUNCTION(BlueprintCallable, Category="PathPlanning|GridMap")
     void ClearObstacles();
     
-    // 获取所有被占用的点
-    void GetAllOccupiedPoints(TArray<FVector>& OutPoints) const;
-    
 private:
     // Grid map data
     TArray<TArray<TArray<bool>>> OccupancyGrid;
@@ -125,6 +119,5 @@ private:
     TArray<FCylinderObstacle> CylinderObstacles;
     
     // Helper methods
-    bool MarkCellsInBox(const FVector& Min, const FVector& Max);
     bool InflateObstacles(float Radius);
 };

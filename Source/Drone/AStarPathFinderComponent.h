@@ -7,6 +7,42 @@
 #include "GridMapComponent.h"
 #include "AStarPathFinderComponent.generated.h"
 
+// A*算法节点状态枚举
+enum class ENodeState
+{
+    UNEXPLORED,
+    OPENSET,
+    CLOSEDSET
+};
+
+// A*算法网格节点结构体
+struct FGridNode
+{
+    FIntVector Index;      // 网格索引
+    float GScore;          // 从起点到当前节点的代价
+    float FScore;          // 总代价 (GScore + 启发式值)
+    FGridNode* CameFrom;   // 父节点
+    ENodeState State;      // 节点状态
+    int32 Rounds;          // 搜索轮次
+
+    FGridNode()
+        : GScore(FLT_MAX)
+        , FScore(FLT_MAX)
+        , CameFrom(nullptr)
+        , State(ENodeState::UNEXPLORED)
+        , Rounds(0)
+    {
+    }
+};
+
+// A*算法结果枚举
+enum class EAStarResult
+{
+    SUCCESS,
+    INIT_ERR,
+    SEARCH_ERR
+};
+
 UCLASS(ClassGroup=(PathPlanning), meta=(BlueprintSpawnableComponent))
 class DRONE_API UAStarPathFinderComponent : public UActorComponent
 {
@@ -16,11 +52,9 @@ public:
     // 设置默认值
     UAStarPathFinderComponent();
 
-    
     // 寻找从起点到终点的路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
     bool FindPath(const FVector& Start, const FVector& Goal, TArray<FVector>& OutPath);
-    
     
     // 可视化路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
@@ -29,34 +63,10 @@ public:
     // 将路径转换为Spline
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
     USplineComponent* CreatePathSpline();
-    
+
     // 设置路径平滑度
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
     float PathSmoothingFactor = 0.5f;
-    
-    // 设置路径点间距
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
-    float PathPointSpacing = 100.0f;
-    
-    // 设置是否自动生成Spline
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
-    bool bAutoCreateSpline = true;
-    
-    // 设置Spline颜色
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
-    FLinearColor SplineColor = FLinearColor::Green;
-    
-    // 设置Spline宽度
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
-    float SplineWidth = 1.0f;
-    
-    // 设置是否使用细线条模式
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
-    bool bUseThinLine = true;
-    
-    // 设置线条透明度
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar", meta=(ClampMin="0.0", ClampMax="1.0"))
-    float LineOpacity = 0.8f;
 
     // 设置无人机尺寸
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar")
@@ -66,14 +76,19 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar", meta=(ClampMin="1.0", ClampMax="3.0"))
     float SafetyFactor = 1.1f;  // 安全距离系数，实际安全距离 = DroneRadius * SafetyFactor
 
-    // Chaikin曲线细分平滑算法声明
-    void ChaikinSmoothPath(TArray<FVector>& Path, int Iterations);
-
     // 新增：用于外部更新存储路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
     void UpdateStoredPath(const TArray<FVector>& NewPath);
 
     void SetPath(const TArray<FVector>& InPath);
+
+    // 存储搜索过程中访问的所有路径点
+    UPROPERTY()
+    TArray<FVector> SearchedPath;
+
+    // 获取搜索过程中访问的所有路径点
+    UFUNCTION(BlueprintCallable, Category = "Path Finding")
+    TArray<FVector> GetSearchedPath();
 
 protected:
     virtual void BeginPlay() override;
@@ -95,30 +110,30 @@ private:
     // 存储的样条曲线数据
     TArray<FVector> StoredSplinePoints;
     float StoredSplineLength;
-    
-    // 启发式函数
-    float GetDiagonalHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2);
-    float GetManhattanHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2);
-    float GetEuclideanHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2);
-    
-    // 计算两个节点间的距离
-    float Distance(struct FAStarNode* A, struct FAStarNode* B);
-    
-    // 获取周围的临近节点（优化版本）
-    void GetNeighborsOptimized(struct FAStarNode* Node, TArray<struct FAStarNode*>& OutNeighbors, int32 GoalX, int32 GoalY, int32 GoalZ);
-    
-    // 重建路径
-    void ReconstructPath(struct FAStarNode* GoalNode, TArray<FVector>& OutPath);
-    
-    // 平滑路径点
-    void SmoothPath(TArray<FVector>& Path);
-    
-    // 存储样条曲线数据
+
+    // A*算法相关变量
+    int32 Rounds;  // 搜索轮次
+    TArray<TArray<TArray<FGridNode*>>> GridNodeMap;  // 三维网格节点地图
+    TArray<FGridNode*> OpenSet;  // 开放列表
+    TArray<FGridNode*> GridPath;  // 存储找到的路径
+    FIntVector PoolSize;  // 网格大小
+    FIntVector CenterIdx;  // 中心索引
+    float GridResolution;  // 网格分辨率
+
+    // A*算法相关函数
+    EAStarResult Search(const FVector& StartPt, const FVector& EndPt);
+    bool ConvertToIndexAndAdjustStartEndPoints(const FVector& StartPt, const FVector& EndPt, FIntVector& StartIdx, FIntVector& EndIdx);
+    bool Coord2Index(const FVector& Coord, FIntVector& Index) const;
+    FVector Index2Coord(const FIntVector& Index) const;
+    float GetHeu(const FGridNode* Node1, const FGridNode* Node2) const;
+    float GetDiagHeu(const FGridNode* Node1, const FGridNode* Node2) const;
+    float GetManhHeu(const FGridNode* Node1, const FGridNode* Node2) const;
+    float GetEuclHeu(const FGridNode* Node1, const FGridNode* Node2) const;
+    TArray<FGridNode*> RetrievePath(FGridNode* Current);
+    bool CheckOccupancy(const FVector& Position) const;
+    void InitGridMap(const FVector& MapSize, float InGridResolution);
+
+    // 样条曲线相关函数
     void StoreSplineData();
-
-    // 检查路径点是否安全
-    bool IsPathPointSafe(const FVector& Point) const;
-
-    // 获取路径点的安全距离
-    float GetSafetyDistance() const { return DroneRadius * SafetyFactor; }
+    void ChaikinSmoothPath(TArray<FVector>& Path, int Iterations);
 };
