@@ -1,5 +1,5 @@
-#include "CoreMinimal.h"
 #include "PathModifierComponent.h"
+#include "CoreMinimal.h"
 #include "GridMapComponent.h"
 #include "AStarPathFinderComponent.h"
 
@@ -52,6 +52,7 @@ void UPathModifierComponent::SetPath(const TArray<FVector>& InPath)
 void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
 {
     // 防止重复处理
+    // UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 进行自动更新"));
     static bool bIsProcessing = false;
     if (bIsProcessing)
     {
@@ -59,6 +60,18 @@ void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
     }
     
     bIsProcessing = true;
+    
+    // 获取 AStarPathFinderComponent
+    UAStarPathFinderComponent* AStarComponent = Cast<UAStarPathFinderComponent>(GetOwner()->GetComponentByClass(UAStarPathFinderComponent::StaticClass()));
+    if (!AStarComponent)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[PathModifier] 未找到 AStarPathFinderComponent"));
+        bIsProcessing = false;
+        return;
+    }
+    
+    // 从 AStarPathFinderComponent 获取当前路径
+    CurrentPath = AStarComponent->GetSearchedPath();
     
     // 检查路径是否被障碍物阻挡
     bool bIsPathBlocked = false;
@@ -69,10 +82,8 @@ void UPathModifierComponent::OnGridUpdated(const FVector& UpdatedLocation)
             bIsPathBlocked = true;
             UE_LOG(LogTemp, Warning, TEXT("[PathModifier] 检测到障碍物阻挡路径，位置: %s"), *CurrentPath[i].ToString());
         }
-        // else
-        // {
-        //     UE_LOG(LogTemp, Log, TEXT("[PathModifier] 路径点未被阻挡，位置: %s"), *CurrentPath[i].ToString());
-        // }
+                    // UE_LOG(LogTemp, Warning, TEXT("[PathModifier] ，位置: %s"), *CurrentPath[i].ToString());
+
     }
     
     // 只有当路径被阻挡时，才进行路径重规划

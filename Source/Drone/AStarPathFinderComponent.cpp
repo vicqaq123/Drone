@@ -202,8 +202,6 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
             
             // 重建路径
             ReconstructPath(Current, OutPath);
-            // 对路径进行平滑处理
-            ChaikinSmoothPath(OutPath, 2); // 2次迭代
             
             // 清理内存
             for (FAStarNode* Node : OpenSet) delete Node;
@@ -214,27 +212,11 @@ bool UAStarPathFinderComponent::FindPath(const FVector& Start, const FVector& Go
                 OutPath.Num(), Steps, DistanceToGoal);
             
             // 在成功找到路径后自动同步到PathModifierComponent
-            if (OutPath.Num() > 0)
+            if (UPathModifierComponent* PathModifier = Cast<UPathModifierComponent>(GetOwner()->GetComponentByClass(UPathModifierComponent::StaticClass())))
             {
-                AActor* Owner = GetOwner();
-                if (Owner)
-                {
-                    UPathModifierComponent* PathMod = Owner->FindComponentByClass<UPathModifierComponent>();
-                    if (PathMod)
-                    {
-                        PathMod->SetPath(OutPath);
-                        UE_LOG(LogTemp, Warning, TEXT("[AStar] 已自动同步路径到PathModifierComponent，点数: %d"), OutPath.Num());
-                    }
-                    else
-                    {
-                        UE_LOG(LogTemp, Error, TEXT("[AStar] 未找到PathModifierComponent组件"));
-                    }
-                }
-                else
-                {
-                    UE_LOG(LogTemp, Error, TEXT("[AStar] 未找到有效的Owner Actor"));
-                }
+                PathModifier->SetPath(OutPath);
             }
+            
             return true;
         }
         
@@ -771,27 +753,6 @@ FVector UAStarPathFinderComponent::GetVelocityAlongSpline(float Distance, float 
     return (NextLocation - CurrentLocation) / DeltaTime;
 }
 
-void UAStarPathFinderComponent::SmoothPath(TArray<FVector>& Path)
-{
-    if (Path.Num() < 3)
-        return;
-        
-    TArray<FVector> SmoothedPath = Path;
-    
-    for (int i = 1; i < Path.Num() - 1; i++)
-    {
-        FVector Prev = Path[i - 1];
-        FVector Current = Path[i];
-        FVector Next = Path[i + 1];
-        
-        // 使用加权平均进行平滑
-        SmoothedPath[i] = Current * (1.0f - PathSmoothingFactor) + 
-                         (Prev + Next) * 0.5f * PathSmoothingFactor;
-    }
-    
-    Path = SmoothedPath;
-}
-
 // 添加新的启发式函数
 float UAStarPathFinderComponent::GetDiagonalHeuristic(int X1, int Y1, int Z1, int X2, int Y2, int Z2)
 {
@@ -911,26 +872,6 @@ bool UAStarPathFinderComponent::IsPathPointSafe(const FVector& Point) const
     }
     
     return true;
-}
-
-// Chaikin曲线细分平滑算法
-void UAStarPathFinderComponent::ChaikinSmoothPath(TArray<FVector>& Path, int Iterations)
-{
-    for (int iter = 0; iter < Iterations; ++iter)
-    {
-        if (Path.Num() < 3) return;
-        TArray<FVector> NewPath;
-        NewPath.Add(Path[0]); // 保留起点
-        for (int i = 0; i < Path.Num() - 1; ++i)
-        {
-            FVector Q = Path[i] * 0.75f + Path[i + 1] * 0.25f;
-            FVector R = Path[i] * 0.25f + Path[i + 1] * 0.75f;
-            NewPath.Add(Q);
-            NewPath.Add(R);
-        }
-        NewPath.Add(Path.Last()); // 保留终点
-        Path = NewPath;
-    }
 }
 
 void UAStarPathFinderComponent::UpdateStoredPath(const TArray<FVector>& NewPath)

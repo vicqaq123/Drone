@@ -92,9 +92,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="PathPlanning|AStar", meta=(ClampMin="1.0", ClampMax="3.0"))
     float SafetyFactor = 1.1f;  // 安全距离系数，实际安全距离 = DroneRadius * SafetyFactor
 
-    // Chaikin曲线细分平滑算法声明
-    void ChaikinSmoothPath(TArray<FVector>& Path, int Iterations);
-
     // 新增：用于外部更新存储路径
     UFUNCTION(BlueprintCallable, Category="PathPlanning|AStar")
     void UpdateStoredPath(const TArray<FVector>& NewPath);
@@ -135,9 +132,6 @@ private:
     
     // 重建路径
     void ReconstructPath(struct FAStarNode* GoalNode, TArray<FVector>& OutPath);
-    
-    // 平滑路径点
-    void SmoothPath(TArray<FVector>& Path);
     
     // 存储样条曲线数据
     void StoreSplineData();

@@ -31,7 +31,7 @@ void UGridMapComponent::BeginPlay()
     {
         // 初始化地图，以所有者为中心
         FVector NewMapSize = FVector(1000.0f, 1000.0f, 200.0f);  // 更大的地图尺寸
-        float NewCellSize = 20.0f;  // 更大的网格尺寸
+        float NewCellSize = 5.0f;  // 更大的网格尺寸
         InitializeMap(GetOwner()->GetActorLocation(), NewMapSize, NewCellSize);
         
         UE_LOG(LogTemp, Warning, TEXT("GridMapComponent初始化完成 - 地图大小: (%.1f, %.1f, %.1f), 网格尺寸: %.1f"), 
@@ -87,161 +87,6 @@ void UGridMapComponent::InitializeMap(FVector Origin, FVector Size, float Resolu
     
 }
 
-void UGridMapComponent::UpdateObstaclesFromScene(float DetectionRadius)
-{
-    if (GridDimX == 0 || GridDimY == 0 || GridDimZ == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Grid map not initialized"));
-        return;
-    }
-    
-    // Clear previous occupancy data
-    for (int x = 0; x < GridDimX; x++)
-    {
-        for (int y = 0; y < GridDimY; y++)
-        {
-            for (int z = 0; z < GridDimZ; z++)
-            {
-                OccupancyGrid[x][y][z] = false;
-            }
-        }
-    }
-    
-    // Get all actors in scene
-    TArray<AActor*> FoundActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
-    
-    // Filter for obstacle actors
-    for (AActor* Actor : FoundActors)
-    {
-        // Skip self and owner
-        if (Actor == GetOwner() || IgnoredActors.Contains(Actor))
-            continue;
-            
-        // Consider static meshes and actors with "Obstacle" tag as obstacles
-        if (Actor->ActorHasTag(FName("Obstacle")) || Actor->IsA(AStaticMeshActor::StaticClass()))
-        {
-            // Get bounds
-            FVector Origin, Extent;
-            Actor->GetActorBounds(true, Origin, Extent);
-            
-            // Mark cells as occupied
-            MarkCellsInBox(Origin - Extent, Origin + Extent);
-        }
-    }
-    
-    // Apply inflation to ensure safety margins
-    InflateObstacles(InflationRadius);
-    
-    if (OnGridMapUpdated.IsBound())
-    {
-        OnGridMapUpdated.Broadcast(FVector::ZeroVector); // 或合适的位置参数
-    }
-}
-
-void UGridMapComponent::AddObstacles(const TArray<FVector>& ObstaclePositions, float InInflationRadius)
-{
-    if (GridDimX == 0 || GridDimY == 0 || GridDimZ == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Grid map not initialized"));
-        return;
-    }
-    
-    InflationRadius = InInflationRadius;
-    
-    for (const FVector& Position : ObstaclePositions)
-    {
-        // Convert to grid coordinates
-        int GridX, GridY, GridZ;
-        if (WorldToGrid(Position, GridX, GridY, GridZ))
-        {
-            OccupancyGrid[GridX][GridY][GridZ] = true;
-        }
-    }
-    
-    // Apply inflation to ensure safety margins
-    InflateObstacles(InflationRadius);
-    
-    if (OnGridMapUpdated.IsBound())
-    {
-        OnGridMapUpdated.Broadcast(FVector::ZeroVector); // 或合适的位置参数
-    }
-}
-
-void UGridMapComponent::AddCylindricalObstacle(const FVector& Position, float Radius, float Height, float InInflationRadius)
-{
-    if (GridDimX == 0 || GridDimY == 0 || GridDimZ == 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Grid map not initialized"));
-        return;
-    }
-    
-    // 正确的赋值方式，避免参数名和成员变量冲突
-    this->InflationRadius = InInflationRadius;
-    
-    // 计算底部和顶部的Z坐标
-    float BottomZ = Position.Z - Height/2;
-    float TopZ = Position.Z + Height/2;
-    
-    // 获取XY平面上圆的范围
-    int MinGridX, MinGridY, MinGridZ;
-    int MaxGridX, MaxGridY, MaxGridZ;
-    
-    // 圆柱的最小外包盒
-    FVector MinPoint(Position.X - Radius, Position.Y - Radius, BottomZ);
-    FVector MaxPoint(Position.X + Radius, Position.Y + Radius, TopZ);
-    
-    // 转换为网格坐标
-    WorldToGrid(MinPoint, MinGridX, MinGridY, MinGridZ);
-    WorldToGrid(MaxPoint, MaxGridX, MaxGridY, MaxGridZ);
-    
-    // 限制在网格范围内
-    MinGridX = FMath::Clamp(MinGridX, 0, GridDimX-1);
-    MinGridY = FMath::Clamp(MinGridY, 0, GridDimY-1);
-    MinGridZ = FMath::Clamp(MinGridZ, 0, GridDimZ-1);
-    
-    MaxGridX = FMath::Clamp(MaxGridX, 0, GridDimX-1);
-    MaxGridY = FMath::Clamp(MaxGridY, 0, GridDimY-1);
-    MaxGridZ = FMath::Clamp(MaxGridZ, 0, GridDimZ-1);
-    
-    // 圆柱体中心在XY平面的网格坐标
-    int CenterGridX, CenterGridY, TempZ;
-    WorldToGrid(Position, CenterGridX, CenterGridY, TempZ);
-    
-    // 半径的平方(网格单位)
-    float RadiusSquaredInCells = FMath::Square(Radius / CellSize);
-    
-    // 遍历并标记圆柱体内的所有网格
-    for (int x = MinGridX; x <= MaxGridX; x++)
-    {
-        for (int y = MinGridY; y <= MaxGridY; y++)
-        {
-            // 计算当前点到圆心XY平面距离的平方
-            float distSquared = FMath::Square(x - CenterGridX) + FMath::Square(y - CenterGridY);
-            
-            // 如果在圆内
-            if (distSquared <= RadiusSquaredInCells)
-            {
-                // 标记该垂直线上在高度范围内的所有网格
-                for (int z = MinGridZ; z <= MaxGridZ; z++)
-                {
-                    OccupancyGrid[x][y][z] = true;
-                }
-            }
-        }
-    }
-    
-    UE_LOG(LogTemp, Log, TEXT("Cylindrical obstacle added at (%f,%f,%f) with radius %f and height %f"), 
-        Position.X, Position.Y, Position.Z, Radius, Height);
-    
-    // 应用膨胀
-    InflateObstacles(InInflationRadius);
-    
-    if (OnGridMapUpdated.IsBound())
-    {
-        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
-    }
-}
 
 void UGridMapComponent::AddCylindricalObstacles(const TArray<FVector>& Positions, float Radius, float Height, float InInflationRadius)
 {
@@ -345,11 +190,14 @@ void UGridMapComponent::MarkAsOccupied(const FVector& Position)
     if (WorldToGrid(Position, GridX, GridY, GridZ))
     {
         OccupancyGrid[GridX][GridY][GridZ] = true;
+        // UE_LOG(LogTemp, Warning, TEXT("已经更新障碍物 (%.2f, %.2f, %.2f)"),Position.X, Position.Y, Position.Z);
     }
     
     if (OnGridMapUpdated.IsBound())
     {
-        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
+        OnGridMapUpdated.Broadcast(Position);
+        // UE_LOG(LogTemp, Warning, TEXT("GridMap: 广播地图更新事件，位置: (%.2f, %.2f, %.2f)"), 
+        //     Position.X, Position.Y, Position.Z);
     }
 }
 
@@ -358,16 +206,26 @@ void UGridMapComponent::MarkAsGround(const FVector& Position)
     int32 GridX, GridY, GridZ;
     if (WorldToGrid(Position, GridX, GridY, GridZ))
     {
-        // 标记地面及其下方的所有格子为障碍物
-        for (int32 z = 0; z <= GridZ; z++)
+        // 将指定位置标记为地面
+        if (GridX >= 0 && GridX < GridDimX &&
+            GridY >= 0 && GridY < GridDimY &&
+            GridZ >= 0 && GridZ < GridDimZ)
         {
-            OccupancyGrid[GridX][GridY][z] = true;
+            // 将网格标记为地面（非障碍物）
+            OccupancyGrid[GridX][GridY][GridZ] = false;
+            UE_LOG(LogTemp, Log, TEXT("GridMap: 位置 (%.2f, %.2f, %.2f) 已标记为地面"), 
+                Position.X, Position.Y, Position.Z);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("GridMap: 无效的网格索引 (%d, %d, %d)"), 
+                GridX, GridY, GridZ);
         }
     }
-    
-    if (OnGridMapUpdated.IsBound())
+    else
     {
-        OnGridMapUpdated.Broadcast(Position); // 或合适的位置参数
+        UE_LOG(LogTemp, Warning, TEXT("GridMap: 无法将位置 (%.2f, %.2f, %.2f) 转换为网格索引"), 
+            Position.X, Position.Y, Position.Z);
     }
 }
 
@@ -440,39 +298,6 @@ FVector UGridMapComponent::GridToWorld(int32 GridX, int32 GridY, int32 GridZ)
     return WorldPos;
 }
 
-void UGridMapComponent::MarkCellsInBox(const FVector& Min, const FVector& Max)
-{
-    // Convert bounds to grid coordinates
-    int MinX, MinY, MinZ;
-    int MaxX, MaxY, MaxZ;
-    
-    bool MinValid = WorldToGrid(Min, MinX, MinY, MinZ);
-    bool MaxValid = WorldToGrid(Max, MaxX, MaxY, MaxZ);
-    
-    if (!MinValid && !MaxValid)
-        return; // Box completely outside the grid
-    
-    // Clamp to grid bounds
-    MinX = FMath::Clamp(MinX, 0, GridDimX-1);
-    MinY = FMath::Clamp(MinY, 0, GridDimY-1);
-    MinZ = FMath::Clamp(MinZ, 0, GridDimZ-1);
-    
-    MaxX = FMath::Clamp(MaxX, 0, GridDimX-1);
-    MaxY = FMath::Clamp(MaxY, 0, GridDimY-1);
-    MaxZ = FMath::Clamp(MaxZ, 0, GridDimZ-1);
-    
-    // Mark cells as occupied
-    for (int x = MinX; x <= MaxX; x++)
-    {
-        for (int y = MinY; y <= MaxY; y++)
-        {
-            for (int z = MinZ; z <= MaxZ; z++)
-            {
-                OccupancyGrid[x][y][z] = true;
-            }
-        }
-    }
-}
 
 void UGridMapComponent::InflateObstacles(float Radius)
 {
@@ -508,7 +333,7 @@ void UGridMapComponent::InflateObstacles(float Radius)
                                 {
                                     // Check if within inflation radius
                                     float distance = FMath::Sqrt((float)(dx*dx + dy*dy + dz*dz)) * CellSize;
-                                    if (distance <= Radius)
+                                    if (distance <= Radius && !OccupancyGrid[nx][ny][nz])
                                     {
                                         OccupancyGrid[nx][ny][nz] = true;
                                     }
@@ -552,4 +377,77 @@ void UGridMapComponent::ClearObstacles()
                 OccupancyGrid[x][y][z] = false;
     if (OnGridMapUpdated.IsBound())
         OnGridMapUpdated.Broadcast(FVector::ZeroVector);
+}
+
+void UGridMapComponent::UpdateObstaclesFromScene(float DetectionRadius)
+{
+    if (!GetWorld() || GridDimX == 0 || GridDimY == 0 || GridDimZ == 0)
+        return;
+
+    // 清空现有障碍物
+    ClearObstacles();
+
+    // 获取所有静态网格体
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), FoundActors);
+
+    // 遍历所有找到的Actor
+    for (AActor* Actor : FoundActors)
+    {
+        // 检查是否在忽略列表中
+        if (IgnoredActors.Contains(Actor))
+            continue;
+
+        // 获取Actor的位置和边界
+        FVector ActorLocation = Actor->GetActorLocation();
+        FVector Origin, Extent;
+        Actor->GetActorBounds(false, Origin, Extent);
+
+        // 检查是否在检测范围内
+        float Distance = FVector::Distance(GetOwner()->GetActorLocation(), ActorLocation);
+        if (Distance > DetectionRadius)
+            continue;
+
+        // 将Actor添加为圆柱形障碍物
+        float Radius = FMath::Max(Extent.X, Extent.Y);
+        float Height = Extent.Z * 2.0f;
+        AddCylindricalObstacle(ActorLocation, Radius, Height, InflationRadius);
+    }
+}
+
+void UGridMapComponent::AddObstacles(const TArray<FVector>& ObstaclePositions, float InInflationRadius)
+{
+    if (GridDimX == 0 || GridDimY == 0 || GridDimZ == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Grid map not initialized"));
+        return;
+    }
+
+    // 设置膨胀半径
+    this->InflationRadius = InInflationRadius;
+
+    // 遍历所有障碍物位置
+    for (const FVector& Position : ObstaclePositions)
+    {
+        // 标记为障碍物
+        MarkAsOccupied(Position);
+    }
+
+    // 应用膨胀
+    InflateObstacles(InInflationRadius);
+
+    if (OnGridMapUpdated.IsBound())
+    {
+        OnGridMapUpdated.Broadcast(FVector::ZeroVector);
+    }
+}
+
+void UGridMapComponent::AddCylindricalObstacle(const FVector& Position, float Radius, float Height, float InInflationRadius)
+{
+    // 创建单个位置的数组
+    TArray<FVector> Positions;
+    Positions.Add(Position);
+
+    // 调用批量添加函数
+    AddCylindricalObstacles(Positions, Radius, Height, InInflationRadius);
 }
